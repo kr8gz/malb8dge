@@ -5,20 +5,20 @@ mod tests {
     macro_rules! token_test {
         {
             $name:ident
-            $c:literal
-            $( $a:expr, $b:expr )+
+            $code:literal
+            $( $value:expr, $pos:expr )+
         } => {
             #[test]
             fn $name() {
-                let lexer = Lexer::from_str("<test>.mlb8".into(), $c.into(), 0);
+                let lexer = Lexer::from_str("<test>.mlb8".into(), $code.into(), 0);
                 let tokens = dbg!(lexer.tokens); // only prints on fail
 
                 let mut i = 0;
                 $(
                     assert!(tokens.get(i) == Some(&Token {
-                        value: $a,
+                        value: $value,
                         macro_data: None,
-                        pos: $b,
+                        pos: $pos,
                     }));
                     i += 1;
                 )+
@@ -28,7 +28,7 @@ mod tests {
     }
 
     token_test! {
-        lex_identifier
+        identifier
         
         "identifier"
 
@@ -36,7 +36,7 @@ mod tests {
     }
 
     token_test! {
-        lex_integer
+        integer
         
         "01234567890"
 
@@ -44,15 +44,15 @@ mod tests {
     }
 
     token_test! {
-        lex_float
+        float
 
-        "12345.67890"
+        "012345.67890"
 
-        TokenType::Float(12345.6789), 0..11
+        TokenType::Float(12345.6789), 0..12
     }
 
     token_test! {
-        lex_identifier_and_comment
+        identifier_and_comment
         
         "ident###ifier"
 
@@ -60,7 +60,7 @@ mod tests {
     }
 
     token_test! {
-        lex_identifiers_and_newlines
+        identifiers_and_newlines
 
         "hello\nworld"
 
@@ -70,7 +70,7 @@ mod tests {
     }
 
     token_test! {
-        lex_operators
+        operators
 
         "+ * /."
 
@@ -80,7 +80,7 @@ mod tests {
     }
 
     token_test! {
-        lex_augmented_assignment
+        augmented_assignment
 
         "a += 3"
 
@@ -90,21 +90,24 @@ mod tests {
     }
 
     token_test! {
-        lex_many_symbols
+        many_symbols
 
-        "+++=== ===```"
+        "+++==@@@ @@@```"
 
         TokenType::Symbol("++".into()),     0..2
         TokenType::Symbol("+=".into()),     2..4
-        TokenType::Symbol("==".into()),     4..6
+        TokenType::Symbol("=".into()),      4..5
+        TokenType::Symbol("@@".into()),     5..7
+        TokenType::Symbol("@".into()),      7..8
 
-        TokenType::Symbol("===".into()),    7..10
-        TokenType::Symbol("``".into()),     10..12
-        TokenType::Symbol("`".into()),      12..13
+        TokenType::Symbol("@@".into()),     9..11
+        TokenType::Symbol("@".into()),      11..12
+        TokenType::Symbol("``".into()),     12..14
+        TokenType::Symbol("`".into()),      14..15
     }
 
     token_test! {
-        lex_float_override
+        float_override
 
         "list.0.0 + 0.0"
 
@@ -120,7 +123,7 @@ mod tests {
     }
 
     token_test! {
-        lex_simple_string
+        simple_string
         
         "\"Hello World!\""
 
@@ -130,7 +133,7 @@ mod tests {
     }
 
     token_test! {
-        lex_interpolated_string
+        interpolated_string
 
         "\"Hello {world}!\""
 
@@ -142,7 +145,7 @@ mod tests {
     }
 
     token_test! {
-        lex_nested_string
+        nested_string
 
         "\"There {apples == 1 ? \"is 1 apple\" ! \"are {apples} apples\"}!\"  ### nesting"
 
@@ -154,7 +157,7 @@ mod tests {
     }
 
     token_test! {
-        lex_string_escapes
+        string_escapes
 
         "\"[\\n, \\t, \\\", \\\\, \\{, \\}, \\invalid]\""
 
@@ -164,7 +167,7 @@ mod tests {
     }
 
     token_test! {
-        lex_simple_replace
+        simple_replace
 
         "s\\ab,cd\\ef,gh\\"
 
@@ -180,11 +183,11 @@ mod tests {
                 vec![Fragment::Literal("gh".into())],
             ],
             mode: ReplaceMode::Normal,
-        }),                                         1..14
+        }),                                             1..14
     }
 
     token_test! {
-        lex_char_replace
+        char_replace
 
         "s\\\\ab,cd\\ef,gh\\"
 
@@ -194,11 +197,11 @@ mod tests {
             left: "ab,cd".into(),
             right: "ef,gh".into(),
             mode: ReplaceMode::Normal,
-        }),                                         1..15
+        }),                                             1..15
     }
 
     token_test! {
-        lex_replace_escapes
+        replace_escapes
 
         "s\\``,`\\,`|,`!,`@,`{,`},`,\\\\"
 
@@ -217,11 +220,11 @@ mod tests {
             ],
             right: vec![],
             mode: ReplaceMode::Normal,
-        }),                                         1..27
+        }),                                             1..27
     }
 
     token_test! {
-        lex_replace_modes
+        replace_modes
 
         "s\\a\\b\\\\c|d\\\\e!f\\\\g@h\\"
 
@@ -235,7 +238,7 @@ mod tests {
                 vec![Fragment::Literal("b".into())],
             ],
             mode: ReplaceMode::Normal,
-        }),                                         1..6
+        }),                                             1..6
 
         TokenType::Replace(ReplaceData {
             left: vec![
@@ -245,7 +248,7 @@ mod tests {
                 vec![Fragment::Literal("d".into())],
             ],
             mode: ReplaceMode::Swap,
-        }),                                         6..11
+        }),                                             6..11
 
         TokenType::Replace(ReplaceData {
             left: vec![
@@ -255,7 +258,7 @@ mod tests {
                 vec![Fragment::Literal("f".into())],
             ],
             mode: ReplaceMode::First,
-        }),                                         11..16
+        }),                                             11..16
 
         TokenType::Replace(ReplaceData {
             left: vec![
@@ -265,11 +268,11 @@ mod tests {
                 vec![Fragment::Literal("h".into())],
             ],
             mode: ReplaceMode::Last,
-        }),                                         16..21
+        }),                                             16..21
     }
 
     token_test! {
-        lex_char_replace_escapes
+        char_replace_escapes
 
         "s\\\\``,`\\,`|,`!,`@,`{,`},`,\\\\"
 
@@ -278,11 +281,11 @@ mod tests {
             left: "`,\\,|,!,@,`{,`},`,".into(),
             right: "".into(),
             mode: ReplaceMode::Normal,
-        }),                                         1..28
+        }),                                             1..28
     }
 
     token_test! {
-        lex_interpolated_replace
+        interpolated_replace
 
         "s\\`{_}\\{_}\\"
 
@@ -295,6 +298,6 @@ mod tests {
                 vec![Fragment::Expr("_".into(), 8)]
             ],
             mode: ReplaceMode::Normal,
-        }),                                         1..11
+        }),                                             1..11
     }
 }
