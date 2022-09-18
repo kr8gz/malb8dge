@@ -100,10 +100,7 @@ pub struct Parser {
 impl Parser {
     pub fn new(lexer: Lexer) -> Self {
         let mut parser = Self {
-            eof: match lexer.tokens.last() {
-                Some(t) => t.pos.end,
-                None => 0,
-            },
+            eof: lexer.tokens.last().map(|t| t.pos.end).unwrap_or(0),
 
             file: lexer.file,
             tokens: lexer.tokens,
