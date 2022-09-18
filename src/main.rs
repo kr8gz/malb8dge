@@ -5,7 +5,6 @@ use ariadne::{Fmt, Color};
 mod constants;
 mod errors;
 
-mod ast;
 mod lexer;
 mod parser;
 mod interpreter;

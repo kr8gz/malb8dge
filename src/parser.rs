@@ -102,7 +102,7 @@ impl Parser {
         let mut parser = Self {
             eof: match lexer.tokens.last() {
                 Some(t) => t.pos.end,
-                None => 1,
+                None => 0,
             },
 
             file: lexer.file,
