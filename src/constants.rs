@@ -4,38 +4,44 @@ pub type Pos = Range<usize>;
 
 macro_rules! symbols {
     (
-        Unary  { $( $u:literal, )* }
-        Binary { $( $b:literal, )* }
-        After  { $( $a:literal, )* }
-        Other  { $( $o:literal, )* }
+        Before  { $( $before:literal, )* }
+        Binary { $( $binary:literal, )* }
+        After  { $( $after:literal, )* }
+        Compare { $( $compare:literal, )* }
+        Other  { $( $other:literal, )* }
     ) => {
-        pub const UNARY_OPERATORS: &[&str] = &[
-            $( $u, )*
+        pub const BEFORE_OPERATORS: &[&str] = &[
+            $( $before, )*
         ];
 
         pub const BINARY_OPERATORS: &[&str] = &[
-            $( $b, )*
+            $( $binary, )*
         ];
 
         pub const AFTER_OPERATORS: &[&str] = &[
-            $( $a, )*
+            $( $after, )*
+        ];
+
+        pub const COMPARE_OPERATORS: &[&str] = &[
+            $( $compare, )*
         ];
 
         pub const OTHER_COMBINED_SYMBOLS: &[&str] = &[
-            $( $o, )*
+            $( $other, )*
         ];
 
         pub const ALL_SYMBOLS: &[&str] = &[
-            $( $u, )*
-            $( $b, )*
-            $( $a, )*
-            $( $o, )*
+            $( $before, )*
+            $( $binary, )*
+            $( $after, )*
+            $( $compare, )*
+            $( $other, )*
         ];
     }
 }
 
 symbols! {
-    Unary {
+    Before {
         // string stuff
         ".", "..", "`", "``",
     
@@ -54,7 +60,7 @@ symbols! {
         "^*", ".*", "**", "/%", "+-", "/.", "/", "*", "-", "+", "%",
 
         // logic stuff
-        ">", "<", ">>", "<<", "==", "!=", "&", "|", "&&", "||",
+        "&", "|", "&&", "||",
     }
 
     // can't have any of these in binary_operators
@@ -64,6 +70,10 @@ symbols! {
 
         // number stuff
         "$", "'", "-?",
+    }
+
+    Compare {
+        ">", "<", ">=", "<=", "==", "!=",
     }
 
     Other {

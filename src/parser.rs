@@ -36,6 +36,8 @@ pub enum NodeType {
     BraceThing { target: BNode, mode: String },
     Replace { target: BNode, mode: ReplaceMode, pairs: Vec<(ReplaceValue, ReplaceValue)> },
     CharReplace { target: BNode, mode: ReplaceMode, pairs: Vec<(char, char)> },
+    Print { values: ONode, mode: PrintMode },
+    Input { prompt: ONode, mode: InputMode },
     Group(BNode), // might not be needed after dealing with precedence and stuff
     List(VNode),
     GetVar(String),
@@ -45,6 +47,20 @@ pub enum NodeType {
     String(Vec<ParsedFragment>),
     Integer(u32),
     Float(f64),
+}
+
+#[derive(Debug)]
+pub enum PrintMode {
+    Normal,
+    Spaces,
+    NoNewline,
+}
+
+#[derive(Debug)]
+pub enum InputMode {
+    String,
+    Number,
+    NumberList,
 }
   
 macro_rules! keywords {
@@ -176,10 +192,11 @@ impl Parser {
 
     fn parse_value(&mut self, optional: bool) -> Option<Node> {
         let mut value = match self.next() {
-            Some(Token { value, pos, .. }) => Node {
-                data: match value {
-                    TokenType::Integer(int) => NodeType::Integer(int),
-                    TokenType::Float(float) => NodeType::Float(float),
+            Some(Token { value, pos, .. }) => {
+                let mut value_end = pos.end;
+                let data = match value {
+                    TokenType::Integer(int) => NodeType::Integer(int), // TODO multiplying thing
+                    TokenType::Float(float) => NodeType::Float(float), // TODO for floats too ig
 
                     TokenType::Identifier(id) => {
                         match Keyword::from_str(&id) {
@@ -199,23 +216,62 @@ impl Parser {
                         }).collect())
                     },
 
-                    TokenType::Symbol(sym) => match sym {
-                        _ => todo!()
+                    TokenType::Symbol(sym) => match sym.as_str() {
+                        "(" => todo!("group"),
+
+                        "[" => todo!("list"),
+
+                        "{" => todo!("block"),
+
+                        "?" => todo!("loop"),
+
+                        ";" | "/" | "|" => {
+                            let expr = self.parse_expression(true);
+                            value_end = expr.as_ref().map(|e| e.pos.end).unwrap_or(pos.end);
+
+                            NodeType::Print {
+                                // TODO no bracket list thingy or something idk
+                                values: Box::new(expr),
+                                mode: match sym.as_str() {
+                                    ";" => PrintMode::Normal,
+                                    "/" => PrintMode::Spaces,
+                                    "|" => PrintMode::NoNewline,
+                                    _ => unreachable!()
+                                },
+                            }
+                        },
+
+                        "_" | "$" | "#$" => todo!("input"),
+
+                        "++" | "--" => todo!("incr bef"),
+
+                        ":" => todo!("0 arg fn"),
+
+                        "&" => NodeType::GlobalVar,
+                        "~" => NodeType::LoopVar,
+
+                        op if BEFORE_OPERATORS.contains(&op) => todo!("bef op"),
+
+                        _ => todo!("probably error")
                     }
 
                     _ => {
                         self.error("Expected value")
-                        .label(pos, "found shit poo") // TODO
+                        .label(pos, &format!("Expected value, found {value}"))
                         .eprint();
-                    },
-                },
-                pos
+                    }
+                };
+
+                Node {
+                    data,
+                    pos: pos.start..value_end
+                }
             },
 
             None => {
                 if !optional {
                     self.error("Expected value")
-                    .label(self.eof..self.eof, "where the fuck is the value its not op[tional") // TODO
+                    .label(self.eof..self.eof, "Expected value, found end of file")
                     .eprint();
                 } else {
                     return None

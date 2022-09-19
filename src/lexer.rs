@@ -1,4 +1,4 @@
-use std::{fs, process};
+use std::{fs, process, fmt::Display};
 
 use ariadne::{Fmt, Color};
 
@@ -42,6 +42,19 @@ pub enum TokenType {
     Integer(u32),
     Float(f64),
     Symbol(String),
+}
+
+impl Display for TokenType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", match self {
+            Self::Identifier(_) => "identifier".into(),
+            Self::Replace(_) | Self::CharReplace(_) => "replace expression".into(),
+            Self::String(_) => "string".into(),
+            Self::Integer(n) => format!("'{n}'"),
+            Self::Float(n) => format!("'{n}'"),
+            Self::Symbol(sym) => format!("'{sym}'"),
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
