@@ -50,9 +50,9 @@ impl Display for TokenType {
             Self::Identifier(_) => "identifier".into(),
             Self::Replace(_) | Self::CharReplace(_) => "replace expression".into(),
             Self::String(_) => "string".into(),
-            Self::Integer(n) => format!("'{n}'"),
-            Self::Float(n) => format!("'{n}'"),
-            Self::Symbol(sym) => format!("'{sym}'"),
+            Self::Integer(_) => "integer".into(),
+            Self::Float(_) => "float".into(),
+            Self::Symbol(sym) => format!("symbol '{sym}'"),
         })
     }
 }
@@ -484,10 +484,10 @@ impl Lexer {
             if is_escape {
                 // lmao
                 match next {
-                                                'n' =>   frag.push('\n'),
-                                                't' =>   frag.push('\t'),
+                                             'n' =>   frag.push('\n'),
+                                             't' =>   frag.push('\t'),
                     _ if "\"\\{}".contains(next) =>   frag.push(next),
-                                                _ => { frag.push('\\'); frag.push(next); }
+                                               _ => { frag.push('\\'); frag.push(next); }
                 };
                 is_escape = false;
             }

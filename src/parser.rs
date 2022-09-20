@@ -1,3 +1,5 @@
+use std::{fmt::Display, iter};
+
 use crate::{constants::*, lexer::*, errors::Error};
 
 type BNode = Box<Node>;
@@ -22,22 +24,24 @@ pub enum NodeType {
     Assign { target: BNode, op: String, value: BNode },
     MultipleAssign { targets: VNode, value: BNode },
     If { cond: BNode, on_true: BNode, on_false: BNode },
-    For { iter: BNode, vars: VNode, mode: String, block: BNode },
-    While { cond: BNode, mode: String, block: BNode },
-    Loop { mode: String, block: BNode },
+    For { iter: BNode, vars: VNode, mode: String, block: BNode },   // x ~ [vars]  mode    ... // x ~ [vars]   [mode] { ... } //
+    While { cond: BNode, mode: String, block: BNode },              // x ~        [mode] ? ... // x ~          [mode] [ ... ] //
+    Loop { mode: String, block: BNode },                            //                   ? ... //            ? [mode] { ... } //
     FnDef { index: usize }, // see Function struct
     BefOp { target: BNode, op: String },
     BinOp { a: BNode, op: String, b: BNode },
     AftOp { target: BNode, op: String },
-    FnCall { target: BNode, args: VNode },
+    FnCall { target: BNode, args: VNode },  
     Index { target: BNode, index: BNode },
     BracketThing { target: BNode, mode: String, value: BNode },
     Slice { target: BNode, start: ONode, stop: ONode, step: ONode },
     BraceThing { target: BNode, mode: String },
-    Replace { target: BNode, mode: ReplaceMode, pairs: Vec<(ReplaceValue, ReplaceValue)> },
-    CharReplace { target: BNode, mode: ReplaceMode, pairs: Vec<(char, char)> },
+    Replace { target: BNode, mode: ReplaceMode, pairs: Vec<(ReplaceValue, Option<ReplaceValue>)> },
+    CharReplace { target: BNode, mode: ReplaceMode, pairs: Vec<(char, Option<char>)> },
     Print { values: ONode, mode: PrintMode },
     Input { prompt: ONode, mode: InputMode },
+    IncrementBef { target: BNode, mode: IncrementMode },
+    IncrementAft { target: BNode, mode: IncrementMode },
     Group(BNode), // might not be needed after dealing with precedence and stuff
     List(VNode),
     GetVar(String),
@@ -47,6 +51,43 @@ pub enum NodeType {
     String(Vec<ParsedFragment>),
     Integer(u32),
     Float(f64),
+}
+
+impl Display for NodeType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", match self {
+            Self::Statements(_) => "block".into(),
+            Self::Return(_) => "return statement".into(),
+            Self::Break(_) => "break statement".into(),
+            Self::Continue(_) => "continue statement".into(),
+            Self::Exit(_) => "exit statement".into(),
+            Self::Assign { .. } | Self::MultipleAssign { .. } => "assignment".into(),
+            Self::If { .. } => "if expression".into(),
+            Self::For { .. } => "for loop".into(),
+            Self::While { .. } => "while loop".into(),
+            Self::Loop { .. } => "loop".into(),
+            Self::FnDef { .. } => "function definition".into(),
+            Self::BefOp { .. } | Self::BinOp { .. } | Self::AftOp { .. } => "expression".into(),
+            Self::FnCall { .. } => "function call".into(),
+            Self::Index { .. } => "index".into(),
+            Self::BracketThing { .. } => "bracket thing".into(),
+            Self::Slice { .. } => "slice".into(),
+            Self::BraceThing { .. } => "brace thing".into(),
+            Self::Replace { .. } | Self::CharReplace { .. } => "replace expression".into(),
+            Self::Print { .. } => "print".into(),
+            Self::Input { .. } => "input".into(),
+            Self::IncrementBef { .. } | Self::IncrementAft { .. } => "incrementation".into(),
+            Self::Group(_) => "group".into(),
+            Self::List(_) => "list".into(),
+            Self::GetVar(var) => format!("variable '{var}'"),
+            Self::Keyword(kw) => format!("keyword '{}'", kw.to_string()),
+            Self::GlobalVar => "global variable".into(),
+            Self::LoopVar => "loop variable".into(),
+            Self::String(_) => "string".into(),
+            Self::Integer(_) => "number".into(),
+            Self::Float(_) => "float".into(),
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -61,6 +102,12 @@ pub enum InputMode {
     String,
     Number,
     NumberList,
+}
+
+#[derive(Debug)]
+pub enum IncrementMode {
+    Add,
+    Sub,
 }
   
 macro_rules! keywords {
@@ -79,20 +126,31 @@ macro_rules! keywords {
                 )* { None }
             }
         }
+
+        impl ToString for Keyword {
+            fn to_string(&self) -> String {
+                match self {
+                    $( Self::$n => stringify!($n).to_ascii_lowercase(), )*
+                }
+            }
+        }
     }
 }
+
 keywords! { True, False, Null }
 
 #[derive(Debug)]
 pub struct Function {
     args: Vec<ArgDef>,
-    block: NodeType,
+    block: Node,
+    pos: Pos,
 }
 
 #[derive(Debug)]
 pub struct ArgDef {
     name: String,
     default: ONode,
+    pos: Pos,
 }
 
 #[derive(Debug)]
@@ -182,6 +240,8 @@ impl Parser {
 
         self.prev();
         self.parse_expression(false)
+
+        // TODO look for end of statement things (bm.is_closing shit)?
     }
     
     fn parse_expression(&mut self, optional: bool) -> Option<Node> {
@@ -191,7 +251,19 @@ impl Parser {
     }
 
     fn parse_value(&mut self, optional: bool) -> Option<Node> {
-        let mut value = match self.next() {
+        macro_rules! expected {
+            ( $pos:expr, $found:expr ) => {
+                if !optional {
+                    self.error("Expected value")
+                    .label($pos, &format!("Expected value, found {}", $found))
+                    .eprint();
+                } else {
+                    return None
+                }
+            }
+        }
+
+        let mut parsed_value = match self.next() {
             Some(Token { value, pos, .. }) => {
                 let mut value_end = pos.end;
                 let data = match value {
@@ -205,81 +277,190 @@ impl Parser {
                         }
                     },
 
-                    TokenType::String(st) => {
-                        NodeType::String(st.into_iter().map(|f| {
-                            match f {
-                                Fragment::Literal(lit) => ParsedFragment::Literal(lit),
-                                Fragment::Expr(expr, offset) => ParsedFragment::Expr(
-                                    Self::new(Lexer::from_str(self.file.clone(), expr, offset)).statements
-                                )
-                            }
-                        }).collect())
-                    },
+                    TokenType::String(st) => NodeType::String(
+                        st.into_iter().map(|f| self.parse_fragment(f)).collect()
+                    ),
 
-                    TokenType::Symbol(sym) => match sym.as_str() {
+                    TokenType::Symbol(ref sym) => match sym.as_str() {
                         "(" => todo!("group"),
 
                         "[" => todo!("list"),
 
                         "{" => todo!("block"),
 
-                        "?" => todo!("loop"),
+                        "?" => todo!("infinite loop"),
 
-                        ";" | "/" | "|" => {
-                            let expr = self.parse_expression(true);
-                            value_end = expr.as_ref().map(|e| e.pos.end).unwrap_or(pos.end);
+                        ";" | "/" | "|" => NodeType::Print {
+                            mode: match sym.as_str() {
+                                ";" => PrintMode::Normal,
+                                "/" => PrintMode::Spaces,
+                                "|" => PrintMode::NoNewline,
+                                _ => unreachable!()
+                            },
 
-                            NodeType::Print {
-                                // TODO no bracket list thingy or something idk
-                                values: Box::new(expr),
-                                mode: match sym.as_str() {
-                                    ";" => PrintMode::Normal,
-                                    "/" => PrintMode::Spaces,
-                                    "|" => PrintMode::NoNewline,
-                                    _ => unreachable!()
-                                },
-                            }
+                            // TODO no bracket list thingy or something idk
+                            values: {
+                                let expr = self.parse_expression(true);
+                                value_end = expr.as_ref().map(|e| e.pos.end).unwrap_or(pos.end);
+                                Box::new(expr)
+                            },
                         },
 
-                        "_" | "$" | "#$" => todo!("input"),
+                        "_" =>  NodeType::Input { prompt: Box::new(None), mode: InputMode::String },
+                        "$" =>  NodeType::Input { prompt: Box::new(None), mode: InputMode::Number },
+                        "#$" => NodeType::Input { prompt: Box::new(None), mode: InputMode::NumberList },
 
-                        "++" | "--" => todo!("incr bef"),
+                        "++" | "--" => NodeType::IncrementBef {
+                            mode: match sym.as_str() {
+                                "++" => IncrementMode::Add,
+                                "--" => IncrementMode::Sub,
+                                _ => unreachable!()
+                            },
+
+                            target: {
+                                let val = self.parse_value(false).unwrap();
+                                value_end = val.pos.end;
+
+                                if !matches!(val.data, NodeType::GetVar(_) | NodeType::GlobalVar | NodeType::LoopVar ) {
+                                    self.error("Invalid usage of increment operator")
+                                    .label(pos, "Can only increment variables")
+                                    .label(val.pos, &format!("Expected variable, found {}", val.data))
+                                    .eprint();
+                                }
+
+                                Box::new(val)
+                            },
+                        },
 
                         ":" => todo!("0 arg fn"),
 
                         "&" => NodeType::GlobalVar,
                         "~" => NodeType::LoopVar,
 
-                        op if BEFORE_OPERATORS.contains(&op) => todo!("bef op"),
+                        op if BEFORE_OPERATORS.contains(&op) => NodeType::BefOp {
+                            op: op.into(),
+                            target: {
+                                let val = self.parse_value(false).unwrap();
+                                value_end = val.pos.end;
+                                Box::new(val)
+                            },
+                        },
 
-                        _ => todo!("probably error")
+                        _ => expected!(pos, value)
                     }
 
-                    _ => {
-                        self.error("Expected value")
-                        .label(pos, &format!("Expected value, found {value}"))
-                        .eprint();
-                    }
+                    _ => expected!(pos, value)
                 };
 
                 Node {
                     data,
-                    pos: pos.start..value_end
+                    pos: pos.start..value_end,
                 }
             },
 
-            None => {
-                if !optional {
-                    self.error("Expected value")
-                    .label(self.eof..self.eof, "Expected value, found end of file")
-                    .eprint();
-                } else {
-                    return None
-                }
-            },
+            None => expected!(self.eof..self.eof, "end of file"),
         };
 
+        while let Some(Token { value, pos, .. }) = self.next() {
+             // parsed_value will be moved and re-assigned later but we need the start pos
+            let value_start = parsed_value.pos.start;
+
+            let data = match value {
+                TokenType::Replace(rd) => NodeType::Replace {
+                    target: Box::new(parsed_value),
+                    mode: rd.mode,
+
+                    pairs: {
+                        // please help me
+                        macro_rules! map_frags {
+                            ( $v:expr ) => {
+                                $v.into_iter().map(
+                                    |v| v.into_iter().map(
+                                        |f| self.parse_fragment(f)
+                                    ).collect()
+                                ).collect()
+                            }
+                        }
+
+                        zip_longer(map_frags!(rd.left), map_frags!(rd.right))
+                    }
+                },
+
+                TokenType::CharReplace(rd) => NodeType::CharReplace {
+                    target: Box::new(parsed_value),
+                    mode: rd.mode,
+                    pairs: zip_longer(rd.left.chars().collect(), rd.right.chars().collect()),
+                },
+
+                TokenType::Symbol(ref sym) => match sym.as_str() {
+                    "(" => todo!("fn call"),
+
+                    "[" => todo!("index or weird bracket shit"),
+
+                    "{" => todo!("brace thingyym mmm m"),
+
+                    "." => todo!("simple indexing"),
+
+                    ":" => todo!("fn def with args (maybe do this after a list instead or both here and that idk)"),
+
+                    "++" | "--" => NodeType::IncrementAft {
+                        mode: match sym.as_str() {
+                            "++" => IncrementMode::Add,
+                            "--" => IncrementMode::Sub,
+                            _ => unreachable!()
+                        },
+
+                        target: {
+                            if !matches!(parsed_value.data, NodeType::GetVar(_) | NodeType::GlobalVar | NodeType::LoopVar ) {
+                                self.error("Invalid usage of increment operator")
+                                .label(pos, "Can only increment variables")
+                                .label(parsed_value.pos, &format!("Expected variable, found {}", parsed_value.data))
+                                .eprint();
+                            }
+
+                            Box::new(parsed_value)
+                        },
+                    },
+
+                    op if AFTER_OPERATORS.contains(&op) => NodeType::AftOp {
+                        op: op.into(),
+                        target: Box::new(parsed_value),
+                    },
+
+                    _ => todo!("probably stop"),
+                }
+
+                _ => todo!("probably stop"),
+            };
+
+            parsed_value = Node {
+                data,
+                pos: value_start..pos.end,
+            }
+        }
+
         // TODO
-        Some(value)
+        Some(parsed_value)
     }
+
+    fn parse_fragment(&mut self, frag: Fragment) -> ParsedFragment {
+        match frag {
+            Fragment::Literal(lit) => ParsedFragment::Literal(lit),
+            Fragment::Expr(expr, offset) => ParsedFragment::Expr(
+                Self::new(Lexer::from_str(self.file.clone(), expr, offset)).statements
+            )
+        }
+    }
+}
+
+fn zip_longer<T>(longer: Vec<T>, shorter: Vec<T>) -> Vec<(T, Option<T>)> {
+    longer
+    .into_iter()
+    .zip(
+        shorter
+        .into_iter()
+        .map(|v| Some(v))
+        .chain(iter::repeat_with(|| None))
+    )
+    .collect()
 }
