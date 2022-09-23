@@ -1,163 +1,6 @@
-use std::{fmt::Display, iter};
+use std::iter;
 
-use crate::{constants::*, lexer::*, errors::Error};
-
-type BNode = Box<Node>;
-type ONode = Box<Option<Node>>;
-type VNode = Vec<Node>;
-
-type ReplaceValue = Vec<ParsedFragment>;
-
-#[derive(Debug)]
-pub struct Node {
-    data: NodeType,
-    pos: Pos,
-}
-
-#[derive(Debug)]
-pub enum NodeType {
-    Statements(VNode),
-    Return(ONode),
-    Break(ONode),
-    Continue(ONode),
-    Exit(ONode),
-    Assign { target: BNode, op: String, value: BNode },
-    MultipleAssign { targets: VNode, value: BNode },
-    If { cond: BNode, on_true: BNode, on_false: BNode },
-    For { iter: BNode, vars: VNode, mode: String, block: BNode },   // x ~ [vars]  mode    ... // x ~ [vars]   [mode] { ... } //
-    While { cond: BNode, mode: String, block: BNode },              // x ~        [mode] ? ... // x ~          [mode] [ ... ] //
-    Loop { mode: String, block: BNode },                            //                   ? ... //            ? [mode] { ... } //
-    FnDef { index: usize }, // see Function struct
-    BefOp { target: BNode, op: String },
-    BinOp { a: BNode, op: String, b: BNode },
-    AftOp { target: BNode, op: String },
-    FnCall { target: BNode, args: VNode },  
-    Index { target: BNode, index: BNode },
-    BracketThing { target: BNode, mode: String, value: BNode },
-    Slice { target: BNode, start: ONode, stop: ONode, step: ONode },
-    BraceThing { target: BNode, mode: String },
-    Replace { target: BNode, mode: ReplaceMode, pairs: Vec<(ReplaceValue, Option<ReplaceValue>)> },
-    CharReplace { target: BNode, mode: ReplaceMode, pairs: Vec<(char, Option<char>)> },
-    Print { values: ONode, mode: PrintMode },
-    Input { prompt: ONode, mode: InputMode },
-    IncrementBef { target: BNode, mode: IncrementMode },
-    IncrementAft { target: BNode, mode: IncrementMode },
-    Group(BNode), // might not be needed after dealing with precedence and stuff
-    List(VNode),
-    GetVar(String),
-    Keyword(Keyword),
-    GlobalVar,
-    LoopVar,
-    String(Vec<ParsedFragment>),
-    Integer(u32),
-    Float(f64),
-}
-
-impl Display for NodeType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", match self {
-            Self::Statements(_) => "block".into(),
-            Self::Return(_) => "return statement".into(),
-            Self::Break(_) => "break statement".into(),
-            Self::Continue(_) => "continue statement".into(),
-            Self::Exit(_) => "exit statement".into(),
-            Self::Assign { .. } | Self::MultipleAssign { .. } => "assignment".into(),
-            Self::If { .. } => "if expression".into(),
-            Self::For { .. } => "for loop".into(),
-            Self::While { .. } => "while loop".into(),
-            Self::Loop { .. } => "loop".into(),
-            Self::FnDef { .. } => "function definition".into(),
-            Self::BefOp { .. } | Self::BinOp { .. } | Self::AftOp { .. } => "expression".into(),
-            Self::FnCall { .. } => "function call".into(),
-            Self::Index { .. } => "index".into(),
-            Self::BracketThing { .. } => "bracket thing".into(),
-            Self::Slice { .. } => "slice".into(),
-            Self::BraceThing { .. } => "brace thing".into(),
-            Self::Replace { .. } | Self::CharReplace { .. } => "replace expression".into(),
-            Self::Print { .. } => "print".into(),
-            Self::Input { .. } => "input".into(),
-            Self::IncrementBef { .. } | Self::IncrementAft { .. } => "incrementation".into(),
-            Self::Group(_) => "group".into(),
-            Self::List(_) => "list".into(),
-            Self::GetVar(var) => format!("variable '{var}'"),
-            Self::Keyword(kw) => format!("keyword '{}'", kw.to_string()),
-            Self::GlobalVar => "global variable".into(),
-            Self::LoopVar => "loop variable".into(),
-            Self::String(_) => "string".into(),
-            Self::Integer(_) => "number".into(),
-            Self::Float(_) => "float".into(),
-        })
-    }
-}
-
-#[derive(Debug)]
-pub enum PrintMode {
-    Normal,
-    Spaces,
-    NoNewline,
-}
-
-#[derive(Debug)]
-pub enum InputMode {
-    String,
-    Number,
-    NumberList,
-}
-
-#[derive(Debug)]
-pub enum IncrementMode {
-    Add,
-    Sub,
-}
-  
-macro_rules! keywords {
-    ( $($n:ident),* ) => {
-        #[derive(Debug)]
-        pub enum Keyword {
-            $( $n, )*
-        }
-
-        impl Keyword {
-            fn from_str(s: &str) -> Option<Self> {
-                $(
-                    if s == stringify!($n).to_ascii_lowercase() {
-                        Some(Self::$n)
-                    } else
-                )* { None }
-            }
-        }
-
-        impl ToString for Keyword {
-            fn to_string(&self) -> String {
-                match self {
-                    $( Self::$n => stringify!($n).to_ascii_lowercase(), )*
-                }
-            }
-        }
-    }
-}
-
-keywords! { True, False, Null }
-
-#[derive(Debug)]
-pub struct Function {
-    args: Vec<ArgDef>,
-    block: Node,
-    pos: Pos,
-}
-
-#[derive(Debug)]
-pub struct ArgDef {
-    name: String,
-    default: ONode,
-    pos: Pos,
-}
-
-#[derive(Debug)]
-pub enum ParsedFragment {
-    Expr(Vec<Node>),
-    Literal(String),
-}
+use crate::{ast::*, constants::*, lexer::*, errors::Error};
 
 #[derive(Debug)]
 pub struct Parser {
@@ -245,9 +88,41 @@ impl Parser {
     }
     
     fn parse_expression(&mut self, optional: bool) -> Option<Node> {
-        let mut expr = self.parse_value(optional);
+        let mut expr = self.parse_value(optional)?;
+        let expr_start = expr.pos.start;
+
+        while let Some(Token { value: ref value @ TokenType::Symbol(ref sym), mut pos, .. }) = self.next() {
+            let data = match sym.as_str() {
+                "," => todo!("funny no parentheses list"),
+
+                "~" => todo!("for or while loop"),
+
+                "?" | "!" => todo!("if expr"),
+
+                "=" => todo!("normal assignment"),
+
+                op if BINARY_OPERATORS.contains(&&op[..op.len() - 1]) && op.ends_with('=') => todo!("augmented assignment"),
+
+                op if BINARY_OPERATORS.contains(&op) => todo!("bin op"),
+
+                op if COMPARE_OPERATORS.contains(&op) => todo!("cmp"),
+
+                _ => {
+                    // TODO ???
+                    self.error("Invalid expression")
+                    .label(pos, &format!("Expected shit, found {value}"))
+                    .eprint();
+                }
+            };
+
+            expr = Node {
+                data,
+                pos: expr_start..pos.end,
+            }
+        }
         
-        expr
+        // TODO error stuff
+        Some(expr)
     }
 
     fn parse_value(&mut self, optional: bool) -> Option<Node> {
@@ -273,7 +148,7 @@ impl Parser {
                     TokenType::Identifier(id) => {
                         match Keyword::from_str(&id) {
                             Some(kw) => NodeType::Keyword(kw),
-                            None => NodeType::GetVar(id),
+                            None => NodeType::Variable(id),
                         }
                     },
 
@@ -310,32 +185,33 @@ impl Parser {
                         "$" =>  NodeType::Input { prompt: Box::new(None), mode: InputMode::Number },
                         "#$" => NodeType::Input { prompt: Box::new(None), mode: InputMode::NumberList },
 
-                        "++" | "--" => NodeType::IncrementBef {
-                            mode: match sym.as_str() {
-                                "++" => IncrementMode::Add,
-                                "--" => IncrementMode::Sub,
+                        "++" | "--" => {
+                            let (mode, verb) = match sym.as_str() {
+                                "++" => (IncrementMode::Add, "increment"),
+                                "--" => (IncrementMode::Sub, "decrement"),
                                 _ => unreachable!()
-                            },
+                            };
+    
+                            NodeType::IncrementBef {
+                                mode,
+                                target: {
+                                    let val = self.parse_value(false).unwrap();
+                                    value_end = val.pos.end;
 
-                            target: {
-                                let val = self.parse_value(false).unwrap();
-                                value_end = val.pos.end;
-
-                                if !matches!(val.data, NodeType::GetVar(_) | NodeType::GlobalVar | NodeType::LoopVar ) {
-                                    self.error("Invalid usage of increment operator")
-                                    .label(pos, "Can only increment variables")
-                                    .label(val.pos, &format!("Expected variable, found {}", val.data))
-                                    .eprint();
+                                    if !matches!(val.data, NodeType::Variable(_) ) {
+                                        self.error(&format!("Invalid usage of {} operator", verb))
+                                        .label(pos, &format!("Can only {} variables", verb))
+                                        .label(val.pos, &format!("Expected variable, found {}", val.data))
+                                        .eprint();
+                                    }
+                                    Box::new(val)
                                 }
-
-                                Box::new(val)
-                            },
+                            }
                         },
 
                         ":" => todo!("0 arg fn"),
 
-                        "&" => NodeType::GlobalVar,
-                        "~" => NodeType::LoopVar,
+                        "&" | "~" => NodeType::Variable(sym.into()),
 
                         op if BEFORE_OPERATORS.contains(&op) => NodeType::BefOp {
                             op: op.into(),
@@ -361,10 +237,9 @@ impl Parser {
             None => expected!(self.eof..self.eof, "end of file"),
         };
 
-        while let Some(Token { value, pos, .. }) = self.next() {
-             // parsed_value will be moved and re-assigned later but we need the start pos
-            let value_start = parsed_value.pos.start;
+        let value_start = parsed_value.pos.start;
 
+        while let Some(Token { value, mut pos, .. }) = self.next() {
             let data = match value {
                 TokenType::Replace(rd) => NodeType::Replace {
                     target: Box::new(parsed_value),
@@ -399,27 +274,37 @@ impl Parser {
 
                     "{" => todo!("brace thingyym mmm m"),
 
-                    "." => todo!("simple indexing"),
+                    "." => NodeType::Index {
+                        target: Box::new(parsed_value),
+                        index: {
+                            // bracketmanager thing to stop parsing if there is a "."
+                            let index = self.parse_value(false).unwrap();
+                            pos.end = index.pos.end;
+                            Box::new(index)
+                        }
+                    },
 
                     ":" => todo!("fn def with args (maybe do this after a list instead or both here and that idk)"),
 
-                    "++" | "--" => NodeType::IncrementAft {
-                        mode: match sym.as_str() {
-                            "++" => IncrementMode::Add,
-                            "--" => IncrementMode::Sub,
+                    "++" | "--" => {
+                        let (mode, verb) = match sym.as_str() {
+                            "++" => (IncrementMode::Add, "increment"),
+                            "--" => (IncrementMode::Sub, "decrement"),
                             _ => unreachable!()
-                        },
+                        };
 
-                        target: {
-                            if !matches!(parsed_value.data, NodeType::GetVar(_) | NodeType::GlobalVar | NodeType::LoopVar ) {
-                                self.error("Invalid usage of increment operator")
-                                .label(pos, "Can only increment variables")
-                                .label(parsed_value.pos, &format!("Expected variable, found {}", parsed_value.data))
-                                .eprint();
+                        NodeType::IncrementAft {
+                            mode,
+                            target: {
+                                if !matches!(parsed_value.data, NodeType::Variable(_) ) {
+                                    self.error(&format!("Invalid usage of {} operator", verb))
+                                    .label(pos, &format!("Can only {} variables", verb))
+                                    .label(parsed_value.pos, &format!("Expected variable, found {}", parsed_value.data))
+                                    .eprint();
+                                }
+                                Box::new(parsed_value)
                             }
-
-                            Box::new(parsed_value)
-                        },
+                        }
                     },
 
                     op if AFTER_OPERATORS.contains(&op) => NodeType::AftOp {
@@ -427,10 +312,10 @@ impl Parser {
                         target: Box::new(parsed_value),
                     },
 
-                    _ => todo!("probably stop"),
+                    _ => { self.prev(); break },
                 }
 
-                _ => todo!("probably stop"),
+                _ => { self.prev(); break },
             };
 
             parsed_value = Node {
@@ -439,16 +324,13 @@ impl Parser {
             }
         }
 
-        // TODO
         Some(parsed_value)
     }
 
-    fn parse_fragment(&mut self, frag: Fragment) -> ParsedFragment {
+    fn parse_fragment(&mut self, frag: LexedFragment) -> ParsedFragment {
         match frag {
-            Fragment::Literal(lit) => ParsedFragment::Literal(lit),
-            Fragment::Expr(expr, offset) => ParsedFragment::Expr(
-                Self::new(Lexer::from_str(self.file.clone(), expr, offset)).statements
-            )
+            LexedFragment::Literal(lit) => ParsedFragment::Literal(lit),
+            LexedFragment::Expr(expr) => ParsedFragment::Expr(Self::new(expr).statements)
         }
     }
 }

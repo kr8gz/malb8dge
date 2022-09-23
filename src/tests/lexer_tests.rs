@@ -2,6 +2,8 @@
 mod tests {
     use crate::lexer::*;
 
+    const FILENAME: &str = "<test>.mlb8";
+
     macro_rules! token_test {
         {
             $name:ident
@@ -10,7 +12,7 @@ mod tests {
         } => {
             #[test]
             fn $name() {
-                let lexer = Lexer::from_str("<test>.mlb8".into(), $code.into(), 0);
+                let lexer = Lexer::from_str(FILENAME.into(), $code.into(), 0);
                 let tokens = dbg!(lexer.tokens); // only prints on fail
 
                 let mut i = 0;
@@ -24,6 +26,12 @@ mod tests {
                 )+
                 assert!(tokens.len() == i);
             }
+        }
+    }
+
+    macro_rules! lex {
+        ( $code:literal, $offset:expr ) => {
+            Lexer::from_str(FILENAME.into(), $code.into(), $offset )
         }
     }
 
@@ -128,7 +136,7 @@ mod tests {
         "\"Hello World!\""
 
         TokenType::String(vec![
-            Fragment::Literal("Hello World!".into())
+            LexedFragment::Literal("Hello World!".into())
         ]), 0..14
     }
 
@@ -138,9 +146,9 @@ mod tests {
         "\"Hello {world}!\""
 
         TokenType::String(vec![
-            Fragment::Literal("Hello ".into()),
-            Fragment::Expr("world".into(), 8),
-            Fragment::Literal("!".into()),
+            LexedFragment::Literal("Hello ".into()),
+            LexedFragment::Expr(lex!("world", 8)),
+            LexedFragment::Literal("!".into()),
         ]), 0..16
     }
 
@@ -150,9 +158,9 @@ mod tests {
         "\"There {apples == 1 ? \"is 1 apple\" ! \"are {apples} apples\"}!\"  ### nesting"
 
         TokenType::String(vec![
-            Fragment::Literal("There ".into()),
-            Fragment::Expr("apples == 1 ? \"is 1 apple\" ! \"are {apples} apples\"".into(), 8),
-            Fragment::Literal("!".into()),
+            LexedFragment::Literal("There ".into()),
+            LexedFragment::Expr(lex!("apples == 1 ? \"is 1 apple\" ! \"are {apples} apples\"", 8)),
+            LexedFragment::Literal("!".into()),
         ]), 0..61
     }
 
@@ -162,7 +170,7 @@ mod tests {
         "\"[\\n, \\t, \\\", \\\\, \\{, \\}, \\invalid]\""
 
         TokenType::String(vec![
-            Fragment::Literal("[\n, \t, \", \\, {, }, \\invalid]".into())
+            LexedFragment::Literal("[\n, \t, \", \\, {, }, \\invalid]".into())
         ]), 0..36
     }
 
@@ -175,12 +183,12 @@ mod tests {
 
         TokenType::Replace(ReplaceData {
             left: vec![
-                vec![Fragment::Literal("ab".into())],
-                vec![Fragment::Literal("cd".into())],
+                vec![LexedFragment::Literal("ab".into())],
+                vec![LexedFragment::Literal("cd".into())],
             ],
             right: vec![
-                vec![Fragment::Literal("ef".into())],
-                vec![Fragment::Literal("gh".into())],
+                vec![LexedFragment::Literal("ef".into())],
+                vec![LexedFragment::Literal("gh".into())],
             ],
             mode: ReplaceMode::Normal,
         }),                                             1..14
@@ -209,14 +217,14 @@ mod tests {
 
         TokenType::Replace(ReplaceData {
             left: vec![
-                vec![Fragment::Literal("`".into())],
-                vec![Fragment::Literal("\\".into())],
-                vec![Fragment::Literal("|".into())],
-                vec![Fragment::Literal("!".into())],
-                vec![Fragment::Literal("@".into())],
-                vec![Fragment::Literal("{".into())],
-                vec![Fragment::Literal("}".into())],
-                vec![Fragment::Literal(",".into())],
+                vec![LexedFragment::Literal("`".into())],
+                vec![LexedFragment::Literal("\\".into())],
+                vec![LexedFragment::Literal("|".into())],
+                vec![LexedFragment::Literal("!".into())],
+                vec![LexedFragment::Literal("@".into())],
+                vec![LexedFragment::Literal("{".into())],
+                vec![LexedFragment::Literal("}".into())],
+                vec![LexedFragment::Literal(",".into())],
             ],
             right: vec![],
             mode: ReplaceMode::Normal,
@@ -232,40 +240,40 @@ mod tests {
 
         TokenType::Replace(ReplaceData {
             left: vec![
-                vec![Fragment::Literal("a".into())],
+                vec![LexedFragment::Literal("a".into())],
             ],
             right: vec![
-                vec![Fragment::Literal("b".into())],
+                vec![LexedFragment::Literal("b".into())],
             ],
             mode: ReplaceMode::Normal,
         }),                                             1..6
 
         TokenType::Replace(ReplaceData {
             left: vec![
-                vec![Fragment::Literal("c".into())],
+                vec![LexedFragment::Literal("c".into())],
             ],
             right: vec![
-                vec![Fragment::Literal("d".into())],
+                vec![LexedFragment::Literal("d".into())],
             ],
             mode: ReplaceMode::Swap,
         }),                                             6..11
 
         TokenType::Replace(ReplaceData {
             left: vec![
-                vec![Fragment::Literal("e".into())],
+                vec![LexedFragment::Literal("e".into())],
             ],
             right: vec![
-                vec![Fragment::Literal("f".into())],
+                vec![LexedFragment::Literal("f".into())],
             ],
             mode: ReplaceMode::First,
         }),                                             11..16
 
         TokenType::Replace(ReplaceData {
             left: vec![
-                vec![Fragment::Literal("g".into())],
+                vec![LexedFragment::Literal("g".into())],
             ],
             right: vec![
-                vec![Fragment::Literal("h".into())],
+                vec![LexedFragment::Literal("h".into())],
             ],
             mode: ReplaceMode::Last,
         }),                                             16..21
@@ -292,10 +300,10 @@ mod tests {
         TokenType::Identifier("s".into()),              0..1
         TokenType::Replace(ReplaceData {
             left: vec![
-                vec![Fragment::Literal("{_}".into())]
+                vec![LexedFragment::Literal("{_}".into())]
             ],
             right: vec![
-                vec![Fragment::Expr("_".into(), 8)]
+                vec![LexedFragment::Expr(lex!("_", 8))]
             ],
             mode: ReplaceMode::Normal,
         }),                                             1..11

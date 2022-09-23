@@ -6,21 +6,10 @@ use crate::{constants::{self, *}, errors::*};
 
 /// Example:
 /// ```
-/// fmt_plural!("Remove the extra value{}", 1) // Remove the extra value
-/// fmt_plural!("Remove the extra value{}", 5) // Remove the extra values
+/// fmt_plural!("Found {} value{}", 1) // Found 1 value
+/// fmt_plural!("Found {} value{}", 5) // Found 5 values
 /// ```
 macro_rules! fmt_plural {
-    ( $s:literal, $n:expr ) => {
-        &format!($s, if $n == 1 { "" } else { "s" })
-    }
-}
-
-/// Example:
-/// ```
-/// fmt_num_plural!("Found {} value{}", 1) // Found 1 value
-/// fmt_num_plural!("Found {} value{}", 5) // Found 5 values
-/// ```
-macro_rules! fmt_num_plural {
     ( $s:literal, $n:expr ) => {
         &format!($s, $n, if $n == 1 { "" } else { "s" })
     }
@@ -38,7 +27,7 @@ pub enum TokenType {
     Identifier(String),
     Replace(ReplaceData),
     CharReplace(CharReplaceData),
-    String(Vec<Fragment>),
+    String(Vec<LexedFragment>),
     Integer(u32),
     Float(f64),
     Symbol(String),
@@ -64,8 +53,8 @@ pub struct MacroData {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReplaceData {
-    pub left: Vec<Vec<Fragment>>,
-    pub right: Vec<Vec<Fragment>>,
+    pub left: Vec<Vec<LexedFragment>>,
+    pub right: Vec<Vec<LexedFragment>>,
     pub mode: ReplaceMode,
 }
 
@@ -103,13 +92,12 @@ enum ReplaceLexStep {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Fragment {
-    // value, pos offset
-    Expr(String, usize),
+pub enum LexedFragment {
+    Expr(Lexer),
     Literal(String),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Lexer {
     pub file: String,
     pub chars: Vec<char>,
@@ -255,7 +243,7 @@ impl Lexer {
 
             else if step == ReplaceLexStep::RightPattern && next == '\\' && brace_depth == 0 {
                 if !frag.is_empty() {
-                    fragments.push(Fragment::Literal(frag));
+                    fragments.push(LexedFragment::Literal(frag));
                 }
                 
                 if !fragments.is_empty() {
@@ -266,11 +254,11 @@ impl Lexer {
                     self.error("Different number of swap pattern values")
                     .label(
                         self.token_start + 1..separator_pos - 1, 
-                        fmt_num_plural!("Left side has {} value{}", left_pattern.len())
+                        fmt_plural!("Left side has {} value{}", left_pattern.len())
                     )
                     .label(
                         separator_pos..self.actual_pos - 1,
-                        fmt_num_plural!("Right side has {} value{}", pattern.len())
+                        fmt_plural!("Right side has {} value{}", pattern.len())
                     )
                     .help("Add or remove some values to balance both sides")
                     .eprint();
@@ -280,11 +268,11 @@ impl Lexer {
                     self.error("More replace values than find values")
                     .label(
                         self.token_start + 1..separator_pos - 1,
-                        fmt_num_plural!("Found {} find value{}", left_pattern.len())
+                        fmt_plural!("Found {} find value{}", left_pattern.len())
                     )
                     .label(
                         separator_pos..self.actual_pos - 1,
-                        fmt_num_plural!("Found {} replace value{}", pattern.len())
+                        fmt_plural!("Found {} replace value{}", pattern.len())
                     )
                     .help("Add more find values or remove some replace values")
                     .eprint();
@@ -299,7 +287,7 @@ impl Lexer {
             }
 
             else if next == ',' && brace_depth == 0 {
-                fragments.push(Fragment::Literal(frag));
+                fragments.push(LexedFragment::Literal(frag));
                 pattern.push(fragments);
 
                 frag = String::new();
@@ -310,7 +298,7 @@ impl Lexer {
                 step = ReplaceLexStep::RightPattern;
                 
                 if !frag.is_empty() {
-                    fragments.push(Fragment::Literal(frag));
+                    fragments.push(LexedFragment::Literal(frag));
                     frag = String::new();
                 }
                 if !fragments.is_empty() {
@@ -334,7 +322,7 @@ impl Lexer {
             else if next == '{' && !is_escape {
                 if brace_depth == 0 {
                     if !frag.is_empty() {
-                        fragments.push(Fragment::Literal(frag));
+                        fragments.push(LexedFragment::Literal(frag));
                         frag = String::new();
                     }
                     frag_start = self.actual_pos;
@@ -349,7 +337,7 @@ impl Lexer {
                 brace_depth -= 1;
 
                 if brace_depth == 0 {
-                    fragments.push(Fragment::Expr(frag, frag_start));
+                    fragments.push(self.lex_fragment(frag, frag_start));
                     frag = String::new();
                 } else {
                     frag.push('}');
@@ -404,11 +392,11 @@ impl Lexer {
                     self.error("Different number of swap pattern values")
                     .label(
                         self.token_start + 1..separator_pos - 1, 
-                        fmt_num_plural!("Left side has {} value{}", left_pattern.len())
+                        fmt_plural!("Left side has {} value{}", left_pattern.len())
                     )
                     .label(
                         separator_pos..self.actual_pos - 1,
-                        fmt_num_plural!("Right side has {} value{}", pattern.len())
+                        fmt_plural!("Right side has {} value{}", pattern.len())
                     )
                     .help("Add or remove some values to balance both sides")
                     .eprint();
@@ -418,11 +406,11 @@ impl Lexer {
                     self.error("More replace values than find values")
                     .label(
                         self.token_start + 1..separator_pos - 1,
-                        fmt_num_plural!("Found {} find value{}", left_pattern.len())
+                        fmt_plural!("Found {} find value{}", left_pattern.len())
                     )
                     .label(
                         separator_pos..self.actual_pos - 1,
-                        fmt_num_plural!("Found {} replace value{}", pattern.len())
+                        fmt_plural!("Found {} replace value{}", pattern.len())
                     )
                     .help("Add more find values or remove some replace values")
                     .eprint();
@@ -498,14 +486,14 @@ impl Lexer {
 
             // end string
             else if next == '"' && brace_depth == 0 {
-                fragments.push(Fragment::Literal(frag));
+                fragments.push(LexedFragment::Literal(frag));
                 self.push(TokenType::String(fragments));
                 return;
             }
 
             else if next == '{' && !is_escape {
                 if brace_depth == 0 {
-                    fragments.push(Fragment::Literal(frag));
+                    fragments.push(LexedFragment::Literal(frag));
                     frag = String::new();
                     frag_start = self.actual_pos;
                 } else {
@@ -519,7 +507,7 @@ impl Lexer {
                 brace_depth -= 1;
                 
                 if brace_depth == 0 {
-                    fragments.push(Fragment::Expr(frag, frag_start));
+                    fragments.push(self.lex_fragment(frag, frag_start));
                     frag = String::new();
                 } else {
                     frag.push('}');
@@ -549,7 +537,7 @@ impl Lexer {
         let mut float = false;
 
         while let Some(next) = self.next() {
-            if next == '.' && !self.floating_point_override {
+            if !float && next == '.' && !self.floating_point_override {
                 float = true;
             }
 
@@ -565,14 +553,6 @@ impl Lexer {
             self.prev();
             float = false;
             number.pop();
-        }
-
-        let points = number.matches('.').count();
-        if points > 1 {
-            self.error("More than one decimal point in number")
-            .label(self.token_start..self.actual_pos, "Found multiple decimal points")
-            .help(fmt_plural!("Remove the extra decimal point{}", points - 1))
-            .eprint();
         }
 
         if float {
@@ -613,5 +593,9 @@ impl Lexer {
 
         self.prev();
         self.push(TokenType::Symbol(symbol));
+    }
+
+    fn lex_fragment(&self, expr: String, offset: usize) -> LexedFragment {
+        LexedFragment::Expr(Lexer::from_str(self.file.clone(), expr, offset))
     }
 }
