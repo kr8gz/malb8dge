@@ -23,7 +23,7 @@ pub enum NodeType {
     Exit(ONode),
     Assign { target: BNode, op: String, value: BNode },
     MultipleAssign { targets: VNode, value: BNode },
-    If { cond: BNode, on_true: BNode, on_false: BNode },
+    If { cond: BNode, on_true: ONode, on_false: ONode },
     For { iter: BNode, vars: VNode, mode: String, block: BNode },   // x ~ [vars]  mode    ... // x ~ [vars]   [mode] { ... } //
     While { cond: BNode, mode: String, block: BNode },              // x ~        [mode] ? ... // x ~          [mode] [ ... ] //
     Loop { mode: String, block: BNode },                            //                   ? ... //            ? [mode] { ... } //
@@ -144,16 +144,15 @@ keywords! { True, False, Null }
 
 #[derive(Debug)]
 pub struct Function {
-    args: Vec<ArgDef>,
-    block: Node,
-    pos: Pos,
+    pub args: Vec<ArgDef>,
+    pub block: Node,
 }
 
 #[derive(Debug)]
 pub struct ArgDef {
-    name: String,
-    default: ONode,
-    pos: Pos,
+    pub name: String,
+    pub default: ONode,
+    pub pos: Pos,
 }
 
 #[derive(Debug)]

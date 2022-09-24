@@ -22,6 +22,12 @@ pub struct Token {
     pub pos: Pos,
 }
 
+impl Token {
+    pub fn is(&self, sym: &str) -> bool {
+        self.value.is(sym)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum TokenType {
     Identifier(String),
@@ -33,6 +39,12 @@ pub enum TokenType {
     Symbol(String),
 }
 
+impl TokenType {
+    pub fn is(&self, sym: &str) -> bool {
+        matches!(self, TokenType::Symbol(ref s) if s == sym)
+    }
+}
+
 impl Display for TokenType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", match self {
@@ -41,7 +53,7 @@ impl Display for TokenType {
             Self::String(_) => "string".into(),
             Self::Integer(_) => "integer".into(),
             Self::Float(_) => "float".into(),
-            Self::Symbol(sym) => format!("symbol '{sym}'"),
+            Self::Symbol(sym) => format!("'{sym}'"),
         })
     }
 }

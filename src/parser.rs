@@ -2,98 +2,6 @@ use std::iter;
 
 use crate::{ast::*, constants::*, lexer::*, errors::Error};
 
-#[derive(Clone, Debug)]
-// any better name?
-struct BracketManager {
-    is_func: bool,
-    is_loop: bool,
-
-    // bracket pairs ("scopes")
-    opening_pos: usize,
-    closing_sym: String,
-
-    // will only stop current parse function
-    separators: Vec<String>,
-}
-
-impl BracketManager {
-    // BracketManager::init() // initial bm
-    // bm.bracket(pos, ")")   // new bracket pair
-    // bm.add_sep(".")        // add symbol which will stop next parsing fn
-    // bm.add_seps(...)       // add multiple of those
-    // bm.clone()             // prevents bm from being moved
-
-    fn init() -> Self {
-        Self {
-            is_func: false,
-            is_loop: false,
-
-            opening_pos: Default::default(),
-            closing_sym: Default::default(),
-
-            separators: Vec::new(),
-        }
-    }
-
-    fn bracket(&self, opening_pos: usize, closing_sym: &str) -> Self {
-        Self {
-            is_func: self.is_func,
-            is_loop: self.is_loop,
-
-            opening_pos,
-            closing_sym: closing_sym.into(),
-
-            separators: Vec::new(),
-        }
-    }
-
-    fn add_sep(&self, sep: &str) -> Self {
-        let mut bm = self.clone();
-        bm.separators.push(sep.into());
-        bm
-    }
-
-    fn add_seps(&self, seps: Vec<&str>) -> Self {
-        let mut bm = self.clone();
-        bm.separators.extend(seps.into_iter().map(|s| s.into()));
-        bm
-    }
-
-    // TODO how the hell will i get the self.prev() in here
-    fn closing(&self, token_value: &TokenType) -> ClosingInstruction {
-        use ClosingInstruction::*;
-
-        if let TokenType::Symbol(sym) = token_value {
-            if *sym == self.closing_sym {
-                if !self.separators.is_empty() {
-                    return Prev
-                } else {
-                    return Close
-                }
-            }
-
-            else if
-                // symbols needed for outer parse functions
-                self.separators.contains(sym) ||
-                // global level + statement separator
-                (self.closing_sym.is_empty() && matches!(sym.as_str(), "\n" | ";"))
-            {
-                return Prev
-            }
-        }
-
-        None
-    }
-}
-
-// TODO fuck this struct
-#[derive(Debug)]
-enum ClosingInstruction {
-    None,
-    Close,
-    Prev,
-}
-
 #[derive(Debug)]
 pub struct Parser {
     pub file: String,
@@ -103,13 +11,15 @@ pub struct Parser {
     pub functions: Vec<Function>,
 
     token_index: usize,
-    eof: usize,
+    eof: Pos,
 }
 
 impl Parser {
     pub fn new(lexer: Lexer) -> Self {
+        let eof = lexer.tokens.last().map(|t| t.pos.end).unwrap_or(0);
+
         let mut parser = Self {
-            eof: lexer.tokens.last().map(|t| t.pos.end).unwrap_or(0),
+            eof: eof..eof,
 
             file: lexer.file,
             tokens: lexer.tokens,
@@ -128,6 +38,16 @@ impl Parser {
         Error::new(&self.file, msg)
     }
 
+    fn expected(&mut self, expected: &str) {
+        if let Some(token) = self.next() {
+            if !token.is(expected) {
+                self.error("Syntax error")
+                .label(token.pos, &format!("Expected '{}', found {}", expected, token.value))
+                .eprint();
+            }
+        }
+    }
+
     fn next(&mut self) -> Option<Token> {
         self.token_index += 1;
         self.tokens.get(self.token_index - 1).cloned()
@@ -139,103 +59,24 @@ impl Parser {
         }
     }
 
+    fn pos_end(&self) -> usize {
+        self.tokens.get(self.token_index - 1).cloned().map(|t| t.pos.end).unwrap_or(self.eof.end)
+    }
+
     fn parse(&mut self) {
         while self.token_index < self.tokens.len() {
-            if let Some(statement) = self.parse_statement(BracketManager::init()) {
+            if let Some(statement) = self.parse_statement() {
                 self.statements.push(statement);
             }
         }
     }
 
-    fn parse_statement(&mut self, bm: BracketManager) -> Option<Node> {
-        let mut statement = None;
-        if let Some(Token { value: TokenType::Symbol(symbol), pos, .. }) = self.next() {
-            match symbol.as_str() {
-                "<" | "%" | ">" | "%%" => {
-                    let expr = self.parse_expression(bm.clone(), true);
-                    statement = Some(Node {
-                        pos: pos.start..match expr {
-                            Some(ref expr) => expr.pos.end,
-                            None => pos.end,
-                        },
-                        data: match symbol.as_str() {
-                            "<" => NodeType::Return, // TODO no return outside function
-                            "%" => NodeType::Break, // TODO no break outside loop
-                            ">" => NodeType::Continue, // TODO no continue outside loop
-                            "%%" => NodeType::Exit,
-                            _ => unreachable!()
-                        } (Box::new(expr)),
-                    })
-                }
-
-                "\n" => return None,
-                _ => ()
-            }
-        }
-
-        if statement.is_none() {
-            self.prev();
-            statement = self.parse_expression(bm.clone(), false);
-        }
-
-        if let Some(Token { value, pos, .. }) = self.next() {
-            if let ClosingInstruction::None = bm.closing(&value) {
-                self.error("Expected end of statement")
-                .label(pos, &format!("Expected end of statement, found {value}"))
-                .eprint();
-            }
-        }
-        self.prev();
-
-        statement
-    }
-    
-    fn parse_expression(&mut self, bm: BracketManager, optional: bool) -> Option<Node> {
-        let mut expr = self.parse_value(bm.clone(), optional)?;
-        let expr_start = expr.pos.start;
-
-        while let Some(Token { value: ref value @ TokenType::Symbol(ref sym), pos, .. }) = self.next() {
-            // TODO bm cloisongg
-
-            let data = match sym.as_str() {
-                "," => todo!("funny no parentheses list"),
-
-                "~" => todo!("for or while loop"),
-
-                "?" | "!" => todo!("if expr"),
-
-                "=" => todo!("normal assignment"),
-
-                op if BINARY_OPERATORS.contains(&&op[..op.len() - 1]) && op.ends_with('=') => todo!("augmented assignment"),
-
-                op if BINARY_OPERATORS.contains(&op) => todo!("bin op"),
-
-                op if COMPARE_OPERATORS.contains(&op) => todo!("cmp"),
-
-                _ => {
-                    // TODO ???
-                    self.error("Invalid expression")
-                    .label(pos, &format!("Expected shit, found {value}"))
-                    .eprint();
-                }
-            };
-
-            expr = Node {
-                data,
-                pos: expr_start..pos.end,
-            }
-        }
-        
-        // TODO error stuff // YO WHAT IF you dont have to close brackets at the end of the file
-        Some(expr)
-    }
-
-    fn parse_value(&mut self, bm: BracketManager, optional: bool) -> Option<Node> {
-        macro_rules! expected {
-            ( $pos:expr, $found:expr ) => {
+    fn parse_atom(&mut self, optional: bool) -> Option<Node> {
+        macro_rules! optional_expected {
+            ( $pos:expr, $expected:expr, $found:expr ) => {
                 if !optional {
-                    self.error("Expected value")
-                    .label($pos, &format!("Expected value, found {}", $found))
+                    self.error("Syntax error")
+                    .label($pos, &format!("Expected {}, found {}", $expected, $found))
                     .eprint();
                 } else {
                     self.prev();
@@ -244,9 +85,8 @@ impl Parser {
             }
         }
 
-        let mut parsed_value = match self.next() {
+        match self.next() {
             Some(Token { value, pos, .. }) => {
-                let mut value_end = pos.end;
                 let data = match value {
                     TokenType::Integer(int) => NodeType::Integer(int), // TODO multiplying thing
                     TokenType::Float(float) => NodeType::Float(float), // TODO for floats too ig
@@ -263,33 +103,47 @@ impl Parser {
                     ),
 
                     TokenType::Symbol(ref sym) => match sym.as_str() {
-                        "(" => todo!("group"),
+                        "(" => {
+                            let expr = self.parse_expression(true);
+                            self.expected(")");
+                            match expr {
+                                Some(expr) => NodeType::Group(Box::new(expr)),
+                                None             => NodeType::List(Vec::new()),
+                            }
+                        },
 
-                        "[" => todo!("list"),
+                        "[" => {
+                            let list = self.parse_list(None);
+                            self.expected("]");
+                            NodeType::List(list)
+                        },
 
-                        "{" => todo!("block"),
+                        "{" => {
+                            self.prev();
+                            return Some(self.parse_block())
+                        },
 
                         "?" => todo!("infinite loop"),
 
                         ";" | "/" | "|" => NodeType::Print {
+                            values: Box::new(self.parse_expression(true)),
                             mode: match sym.as_str() {
                                 ";" => PrintMode::Normal,
                                 "/" => PrintMode::Spaces,
                                 "|" => PrintMode::NoNewline,
                                 _ => unreachable!()
                             },
-
-                            // TODO no bracket list thingy or something idk
-                            values: {
-                                let expr = self.parse_expression(bm.clone(), true);
-                                value_end = expr.as_ref().map(|e| e.pos.end).unwrap_or(pos.end);
-                                Box::new(expr)
-                            },
                         },
 
-                        "_" =>  NodeType::Input { prompt: Box::new(None), mode: InputMode::String },
-                        "$" =>  NodeType::Input { prompt: Box::new(None), mode: InputMode::Number },
-                        "#$" => NodeType::Input { prompt: Box::new(None), mode: InputMode::NumberList },
+                        "_" | "$" | "#$" =>  NodeType::Input {
+                            prompt: Box::new(None),
+                            mode: match sym.as_str() {
+                                "_" => InputMode::String,
+                                "$" => InputMode::Number,
+                                "#$" => InputMode::NumberList,
+                                _ => unreachable!()
+                            },
+                        },
 
                         "++" | "--" => {
                             let (mode, verb) = match sym.as_str() {
@@ -301,8 +155,7 @@ impl Parser {
                             NodeType::IncrementBef {
                                 mode,
                                 target: {
-                                    let val = self.parse_value(bm.clone(), false).unwrap();
-                                    value_end = val.pos.end;
+                                    let val = self.parse_value(false).unwrap();
 
                                     if !matches!(val.data, NodeType::Variable(_) ) {
                                         self.error(&format!("Invalid usage of {verb} operator"))
@@ -310,42 +163,177 @@ impl Parser {
                                         .label(val.pos, &format!("Expected variable, found {}", val.data))
                                         .eprint();
                                     }
+
                                     Box::new(val)
                                 }
                             }
                         },
 
-                        ":" => todo!("0 arg fn"),
+                        ":" => self.parse_fn_def(Vec::new()),
 
                         "&" | "~" => NodeType::Variable(sym.into()),
 
                         op if BEFORE_OPERATORS.contains(&op) => NodeType::BefOp {
                             op: op.into(),
-                            target: {
-                                let val = self.parse_value(bm.clone(), false).unwrap();
-                                value_end = val.pos.end;
-                                Box::new(val)
-                            },
+                            target: Box::new(self.parse_value(false).unwrap()),
                         },
 
-                        _ => expected!(pos, value)
+                        _ => optional_expected!(pos, "value", value)
                     }
 
-                    _ => expected!(pos, value)
+                    _ => optional_expected!(pos, "value", value)
                 };
 
-                Node {
+                Some(Node {
                     data,
-                    pos: pos.start..value_end,
-                }
+                    pos: pos.start..self.pos_end(),
+                })
             },
 
-            None => expected!(self.eof..self.eof, "end of file"),
-        };
+            None => optional_expected!(self.eof.clone(), "value", "end of file"),
+        }
+    }
 
+    fn parse_block(&mut self) -> Node {
+        // TODO
+        Node {
+            data: NodeType::Statements(Vec::new()),
+            pos: self.pos_end()..self.pos_end(),
+        }
+    }
+
+    fn parse_expression(&mut self, optional: bool) -> Option<Node> {
+        let mut expr = self.parse_value(optional)?;
+        let expr_start = expr.pos.start;
+
+        if let Some(Token { value: ref value @ TokenType::Symbol(ref sym), pos, .. }) = self.next() {
+            let data = match sym.as_str() {
+                "," => NodeType::List(self.parse_list(Some(expr))),
+
+                "~" => todo!("for or while loop"),
+
+                "?" | "!" => self.parse_if(expr, sym == "!"),
+
+                "=" => todo!("normal assignment"),
+
+                op if BINARY_OPERATORS.contains(&&op[..op.len() - 1]) && op.ends_with('=') => todo!("augmented assignment"),
+
+                op if BINARY_OPERATORS.contains(&op) => todo!("bin op"),
+
+                op if COMPARE_OPERATORS.contains(&op) => todo!("cmp"),
+
+                _ => { self.prev(); return Some(expr) }
+            };
+
+            expr = Node {
+                data,
+                pos: expr_start..self.pos_end(),
+            }
+        }
+        
+        // TODO error stuff // YO WHAT IF you dont have to close brackets at the end of the file
+        Some(expr)
+    }
+
+    fn parse_fn_def(&mut self, args: Vec<Node>) -> NodeType {
+        let f = Function {
+            args: Vec::new(), // TODO map Vec<Node> to Vec<ArgDef>
+            block: self.parse_block(),
+        };
+        self.functions.push(f);
+
+        NodeType::FnDef {
+            index: self.functions.len() - 1,
+        }
+    }
+    
+    fn parse_fragment(&mut self, frag: LexedFragment) -> ParsedFragment {
+        match frag {
+            LexedFragment::Literal(lit) => ParsedFragment::Literal(lit),
+            LexedFragment::Expr(expr) => ParsedFragment::Expr(Self::new(expr).statements)
+        }
+    }
+
+    fn parse_if(&mut self, cond: Node, invert: bool) -> NodeType {
+        let mut on_true = Some(self.parse_block());
+        let mut on_false = None;
+
+        if let Some(token) = self.next() {
+            if token.is("!") {
+                on_false = Some(self.parse_block());
+            } else {
+                self.prev();
+            }
+        }
+        
+        if invert {
+            (on_true, on_false) = (on_false, on_true);
+        }
+
+        NodeType::If {
+            cond: Box::new(cond),
+            on_true: Box::new(on_true),
+            on_false: Box::new(on_false),
+        }
+    }
+
+    fn parse_list(&mut self, first: Option<Node>) -> Vec<Node> {
+        let mut list = first.into_iter().collect();
+        
+        // TODO
+        // this list can also act as function arg definitions or multiple assignment targets
+        // different unpack behavior
+
+        list
+    }
+
+    fn parse_statement(&mut self) -> Option<Node> {
+        let mut statement = None;
+        if let Some(Token { value: TokenType::Symbol(symbol), pos, .. }) = self.next() {
+            match symbol.as_str() {
+                "<" | "%" | ">" | "%%" => {
+                    let expr = self.parse_expression(true);
+                    statement = Some(Node {
+                        pos: pos.start..match expr {
+                            Some(ref expr) => expr.pos.end,
+                            None => pos.end,
+                        },
+                        data: match symbol.as_str() {
+                            "<" => NodeType::Return, // TODO (?) no return outside function
+                            "%" => NodeType::Break, // TODO (?) no break outside loop
+                            ">" => NodeType::Continue, // TODO (?) no continue outside loop
+                            "%%" => NodeType::Exit,
+                            _ => unreachable!()
+                        } (Box::new(expr)),
+                    })
+                }
+
+                "\n" => return None,
+                _ => ()
+            }
+        }
+
+        if statement.is_none() {
+            self.prev();
+            statement = self.parse_expression(false);
+        }
+
+        if let Some(token) = self.next() {
+            if !token.is("\n") && !token.is(";") {
+                self.error("Syntax error")
+                .label(token.pos, &format!("Expected statement separator, found {}", token.value))
+                .eprint();
+            }
+        }
+
+        statement
+    }
+
+    fn parse_value(&mut self, optional: bool) -> Option<Node> {
+        let mut parsed_value = self.parse_atom(optional)?;
         let value_start = parsed_value.pos.start;
 
-        while let Some(Token { value, mut pos, .. }) = self.next() {
+        while let Some(Token { value, pos, .. }) = self.next() {
             let data = match value {
                 TokenType::Replace(rd) => NodeType::Replace {
                     target: Box::new(parsed_value),
@@ -382,14 +370,10 @@ impl Parser {
 
                     "." => NodeType::Index {
                         target: Box::new(parsed_value),
-                        index: {
-                            let index = self.parse_value(bm.add_sep("."), false).unwrap();
-                            pos.end = index.pos.end;
-                            Box::new(index)
-                        }
+                        index: Box::new(self.parse_atom(false).unwrap()),
                     },
 
-                    ":" => todo!("fn def with args (maybe do this after a list instead or both here and that idk)"),
+                    ":" => self.parse_fn_def(vec![parsed_value]),
 
                     "++" | "--" => {
                         let (mode, verb) = match sym.as_str() {
@@ -407,6 +391,7 @@ impl Parser {
                                     .label(parsed_value.pos, &format!("Expected variable, found {}", parsed_value.data))
                                     .eprint();
                                 }
+
                                 Box::new(parsed_value)
                             }
                         }
@@ -425,18 +410,11 @@ impl Parser {
 
             parsed_value = Node {
                 data,
-                pos: value_start..pos.end,
+                pos: value_start..self.pos_end(),
             }
         }
 
         Some(parsed_value)
-    }
-
-    fn parse_fragment(&mut self, frag: LexedFragment) -> ParsedFragment {
-        match frag {
-            LexedFragment::Literal(lit) => ParsedFragment::Literal(lit),
-            LexedFragment::Expr(expr) => ParsedFragment::Expr(Self::new(expr).statements)
-        }
     }
 }
 
@@ -446,7 +424,7 @@ fn zip_longer<T>(longer: Vec<T>, shorter: Vec<T>) -> Vec<(T, Option<T>)> {
     .zip(
         shorter
         .into_iter()
-        .map(|v| Some(v))
+        .map(Some)
         .chain(iter::repeat_with(|| None))
     )
     .collect()
