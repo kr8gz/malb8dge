@@ -2,6 +2,98 @@ use std::iter;
 
 use crate::{ast::*, constants::*, lexer::*, errors::Error};
 
+#[derive(Clone, Debug)]
+// any better name?
+struct BracketManager {
+    is_func: bool,
+    is_loop: bool,
+
+    // bracket pairs ("scopes")
+    opening_pos: usize,
+    closing_sym: String,
+
+    // will only stop current parse function
+    separators: Vec<String>,
+}
+
+impl BracketManager {
+    // BracketManager::init() // initial bm
+    // bm.bracket(pos, ")")   // new bracket pair
+    // bm.add_sep(".")        // add symbol which will stop next parsing fn
+    // bm.add_seps(...)       // add multiple of those
+    // bm.clone()             // prevents bm from being moved
+
+    fn init() -> Self {
+        Self {
+            is_func: false,
+            is_loop: false,
+
+            opening_pos: Default::default(),
+            closing_sym: Default::default(),
+
+            separators: Vec::new(),
+        }
+    }
+
+    fn bracket(&self, opening_pos: usize, closing_sym: &str) -> Self {
+        Self {
+            is_func: self.is_func,
+            is_loop: self.is_loop,
+
+            opening_pos,
+            closing_sym: closing_sym.into(),
+
+            separators: Vec::new(),
+        }
+    }
+
+    fn add_sep(&self, sep: &str) -> Self {
+        let mut bm = self.clone();
+        bm.separators.push(sep.into());
+        bm
+    }
+
+    fn add_seps(&self, seps: Vec<&str>) -> Self {
+        let mut bm = self.clone();
+        bm.separators.extend(seps.into_iter().map(|s| s.into()));
+        bm
+    }
+
+    // TODO how the hell will i get the self.prev() in here
+    fn closing(&self, token_value: &TokenType) -> ClosingInstruction {
+        use ClosingInstruction::*;
+
+        if let TokenType::Symbol(sym) = token_value {
+            if *sym == self.closing_sym {
+                if !self.separators.is_empty() {
+                    return Prev
+                } else {
+                    return Close
+                }
+            }
+
+            else if
+                // symbols needed for outer parse functions
+                self.separators.contains(sym) ||
+                // global level + statement separator
+                (self.closing_sym.is_empty() && matches!(sym.as_str(), "\n" | ";"))
+            {
+                return Prev
+            }
+        }
+
+        None
+    }
+}
+
+// TODO fuck this struct
+#[derive(Debug)]
+enum ClosingInstruction {
+    None,
+    Close,
+    Prev,
+}
+
 #[derive(Debug)]
 pub struct Parser {
     pub file: String,
@@ -49,22 +141,22 @@ impl Parser {
 
     fn parse(&mut self) {
         while self.token_index < self.tokens.len() {
-            if let Some(statement) = self.parse_statement() {
+            if let Some(statement) = self.parse_statement(BracketManager::init()) {
                 self.statements.push(statement);
             }
         }
     }
 
-    fn parse_statement(&mut self) -> Option<Node> {
-        if let Some(Token { value: TokenType::Symbol(symbol), pos: first_pos, .. }) = self.next() {
+    fn parse_statement(&mut self, bm: BracketManager) -> Option<Node> {
+        let mut statement = None;
+        if let Some(Token { value: TokenType::Symbol(symbol), pos, .. }) = self.next() {
             match symbol.as_str() {
                 "<" | "%" | ">" | "%%" => {
-                    let expr = self.parse_expression(true);
-
-                    return Some(Node {
-                        pos: first_pos.start..match expr {
+                    let expr = self.parse_expression(bm.clone(), true);
+                    statement = Some(Node {
+                        pos: pos.start..match expr {
                             Some(ref expr) => expr.pos.end,
-                            None => first_pos.end,
+                            None => pos.end,
                         },
                         data: match symbol.as_str() {
                             "<" => NodeType::Return, // TODO no return outside function
@@ -81,17 +173,30 @@ impl Parser {
             }
         }
 
-        self.prev();
-        self.parse_expression(false)
+        if statement.is_none() {
+            self.prev();
+            statement = self.parse_expression(bm.clone(), false);
+        }
 
-        // TODO look for end of statement things (bm.is_closing shit)?
+        if let Some(Token { value, pos, .. }) = self.next() {
+            if let ClosingInstruction::None = bm.closing(&value) {
+                self.error("Expected end of statement")
+                .label(pos, &format!("Expected end of statement, found {value}"))
+                .eprint();
+            }
+        }
+        self.prev();
+
+        statement
     }
     
-    fn parse_expression(&mut self, optional: bool) -> Option<Node> {
-        let mut expr = self.parse_value(optional)?;
+    fn parse_expression(&mut self, bm: BracketManager, optional: bool) -> Option<Node> {
+        let mut expr = self.parse_value(bm.clone(), optional)?;
         let expr_start = expr.pos.start;
 
-        while let Some(Token { value: ref value @ TokenType::Symbol(ref sym), mut pos, .. }) = self.next() {
+        while let Some(Token { value: ref value @ TokenType::Symbol(ref sym), pos, .. }) = self.next() {
+            // TODO bm cloisongg
+
             let data = match sym.as_str() {
                 "," => todo!("funny no parentheses list"),
 
@@ -121,11 +226,11 @@ impl Parser {
             }
         }
         
-        // TODO error stuff
+        // TODO error stuff // YO WHAT IF you dont have to close brackets at the end of the file
         Some(expr)
     }
 
-    fn parse_value(&mut self, optional: bool) -> Option<Node> {
+    fn parse_value(&mut self, bm: BracketManager, optional: bool) -> Option<Node> {
         macro_rules! expected {
             ( $pos:expr, $found:expr ) => {
                 if !optional {
@@ -133,6 +238,7 @@ impl Parser {
                     .label($pos, &format!("Expected value, found {}", $found))
                     .eprint();
                 } else {
+                    self.prev();
                     return None
                 }
             }
@@ -175,7 +281,7 @@ impl Parser {
 
                             // TODO no bracket list thingy or something idk
                             values: {
-                                let expr = self.parse_expression(true);
+                                let expr = self.parse_expression(bm.clone(), true);
                                 value_end = expr.as_ref().map(|e| e.pos.end).unwrap_or(pos.end);
                                 Box::new(expr)
                             },
@@ -195,12 +301,12 @@ impl Parser {
                             NodeType::IncrementBef {
                                 mode,
                                 target: {
-                                    let val = self.parse_value(false).unwrap();
+                                    let val = self.parse_value(bm.clone(), false).unwrap();
                                     value_end = val.pos.end;
 
                                     if !matches!(val.data, NodeType::Variable(_) ) {
-                                        self.error(&format!("Invalid usage of {} operator", verb))
-                                        .label(pos, &format!("Can only {} variables", verb))
+                                        self.error(&format!("Invalid usage of {verb} operator"))
+                                        .label(pos, &format!("Can only {verb} variables"))
                                         .label(val.pos, &format!("Expected variable, found {}", val.data))
                                         .eprint();
                                     }
@@ -216,7 +322,7 @@ impl Parser {
                         op if BEFORE_OPERATORS.contains(&op) => NodeType::BefOp {
                             op: op.into(),
                             target: {
-                                let val = self.parse_value(false).unwrap();
+                                let val = self.parse_value(bm.clone(), false).unwrap();
                                 value_end = val.pos.end;
                                 Box::new(val)
                             },
@@ -277,8 +383,7 @@ impl Parser {
                     "." => NodeType::Index {
                         target: Box::new(parsed_value),
                         index: {
-                            // bracketmanager thing to stop parsing if there is a "."
-                            let index = self.parse_value(false).unwrap();
+                            let index = self.parse_value(bm.add_sep("."), false).unwrap();
                             pos.end = index.pos.end;
                             Box::new(index)
                         }
@@ -297,8 +402,8 @@ impl Parser {
                             mode,
                             target: {
                                 if !matches!(parsed_value.data, NodeType::Variable(_) ) {
-                                    self.error(&format!("Invalid usage of {} operator", verb))
-                                    .label(pos, &format!("Can only {} variables", verb))
+                                    self.error(&format!("Invalid usage of {verb} operator"))
+                                    .label(pos, &format!("Can only {verb} variables"))
                                     .label(parsed_value.pos, &format!("Expected variable, found {}", parsed_value.data))
                                     .eprint();
                                 }
