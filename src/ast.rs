@@ -116,28 +116,26 @@ macro_rules! iter_modes {
 }
 
 iter_modes! {
-    // returns value    // fn behavior
-    Sum: "+",           // map
-    Product: "*",       // map
-    All: "&",           // map
-    AllBool: "&&",      // map
-    Any: "|",           // map
-    AnyBool: "||",      // map
-    AllEqual: "=",      // map
-    AllUnequal: "^",    // map
-
-    Min: ".",           // key
-    Max: "`",           // key
-    MostFreq: "#",      // key
+    // returns value
+    Sum: "+",
+    Product: "*",
+    All: "&",
+    AllBool: "&&",
+    Any: "|",
+    AnyBool: "||",
+    AllEqual: "=",
+    AllUnequal: "^",
+    Min: ".",
+    Max: "`",
+    MostFreq: "#",
 
     // returns list
-    Map: "~",           // map
-    Unique: "/",        // map
-    Print: ";",         // map
-
-    SortAsc: "<",       // key
-    SortDesc: ">",      // key
-    Filter: "-",        // key
+    Map: "~",
+    Unique: "/",
+    Print: ";",
+    SortAsc: "<",
+    SortDesc: ">",
+    Filter: "-",
 }
 
 #[derive(Debug)]
