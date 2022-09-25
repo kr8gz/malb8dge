@@ -22,12 +22,6 @@ pub struct Token {
     pub pos: Pos,
 }
 
-impl Token {
-    pub fn is(&self, sym: &str) -> bool {
-        self.value.is(sym)
-    }
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum TokenType {
     Identifier(String),
@@ -37,11 +31,16 @@ pub enum TokenType {
     Integer(u32),
     Float(f64),
     Symbol(String),
+    Eof,
 }
 
 impl TokenType {
     pub fn is(&self, sym: &str) -> bool {
         matches!(self, TokenType::Symbol(ref s) if s == sym)
+    }
+
+    pub fn eof(&self) -> bool {
+        matches!(self, TokenType::Eof)
     }
 }
 
@@ -54,6 +53,7 @@ impl Display for TokenType {
             Self::Integer(_) => "integer".into(),
             Self::Float(_) => "float".into(),
             Self::Symbol(sym) => format!("'{sym}'"),
+            Self::Eof => "end of file".into(),
         })
     }
 }

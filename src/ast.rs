@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::{lexer::ReplaceMode, constants::Pos};
+use crate::{lexer::*, constants::*};
 
 type BNode = Box<Node>;
 type ONode = Box<Option<Node>>;
@@ -24,18 +24,18 @@ pub enum NodeType {
     Assign { target: BNode, op: String, value: BNode },
     MultipleAssign { targets: VNode, value: BNode },
     If { cond: BNode, on_true: ONode, on_false: ONode },
-    For { iter: BNode, vars: VNode, mode: String, block: BNode },   // x ~ [vars]  mode    ... // x ~ [vars]   [mode] { ... } //
-    While { cond: BNode, mode: String, block: BNode },              // x ~        [mode] ? ... // x ~          [mode] [ ... ] //
-    Loop { mode: String, block: BNode },                            //                   ? ... //            ? [mode] { ... } //
+    For { iter: BNode, vars: VNode, mode: IterMode, block: BNode },   // x ~ [vars]  mode    ... // x ~ [vars]   [mode] { ... } //
+    While { cond: BNode, mode: IterMode, block: BNode },              // x ~        [mode] ? ... // x ~          [mode] [ ... ] //
+    Loop { mode: IterMode, block: BNode },                            //                   ? ... //            ? [mode] { ... } //
     FnDef { index: usize }, // see Function struct
     BefOp { target: BNode, op: String },
     BinOp { a: BNode, op: String, b: BNode },
     AftOp { target: BNode, op: String },
     FnCall { target: BNode, args: VNode },  
     Index { target: BNode, index: BNode },
-    BracketThing { target: BNode, mode: String, value: BNode },
     Slice { target: BNode, start: ONode, stop: ONode, step: ONode },
-    BraceThing { target: BNode, mode: String },
+    BracketThing { target: BNode, mode: IterMode, value: BNode },
+    BraceThing { target: BNode, mode: IterMode },
     Replace { target: BNode, mode: ReplaceMode, pairs: Vec<(ReplaceValue, Option<ReplaceValue>)> },
     CharReplace { target: BNode, mode: ReplaceMode, pairs: Vec<(char, Option<char>)> },
     Print { values: ONode, mode: PrintMode },
@@ -91,6 +91,53 @@ impl Display for NodeType {
             Self::Float(_) => "float".into(),
         })
     }
+}
+
+macro_rules! iter_modes {
+    ( $( $name:ident: $sym:literal, )* ) => {
+        #[derive(Debug)]
+        pub enum IterMode {
+            $( $name, )*
+            Default
+        }
+        
+        impl IterMode {
+            pub fn from_token(t: &Token) -> Self {
+                if let TokenType::Symbol(sym) = &t.value {
+                    match sym.as_str() {
+                        $( $sym => return Self::$name, )*
+                        _ => ()
+                    }
+                }
+                Self::Default
+            }
+        }
+    }
+}
+
+iter_modes! {
+    // returns value    // fn behavior
+    Sum: "+",           // map
+    Product: "*",       // map
+    All: "&",           // map
+    AllBool: "&&",      // map
+    Any: "|",           // map
+    AnyBool: "||",      // map
+    AllEqual: "=",      // map
+    AllUnequal: "^",    // map
+
+    Min: ".",           // key
+    Max: "`",           // key
+    MostFreq: "#",      // key
+
+    // returns list
+    Map: "~",           // map
+    Unique: "/",        // map
+    Print: ";",         // map
+
+    SortAsc: "<",       // key
+    SortDesc: ">",      // key
+    Filter: "-",        // key
 }
 
 #[derive(Debug)]
