@@ -229,6 +229,7 @@ impl Parser {
 
     fn parse_expression(&mut self, optional: bool) -> Option<Node> {
         let mut expr = self.parse_value(optional)?;
+        let expr_start = expr.pos.start;
 
         if let Token { value: TokenType::Symbol(ref sym), pos, .. } = self.next() {
             macro_rules! is_stop {
@@ -333,7 +334,7 @@ impl Parser {
 
             expr = Node {
                 data,
-                pos: pos.start..self.pos_end(),
+                pos: expr_start..self.pos_end(),
             }
         } else {
             self.prev();
