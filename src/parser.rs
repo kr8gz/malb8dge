@@ -325,13 +325,11 @@ impl Parser {
             if !next.value.is("{") {
                 macro_rules! parse_ident {
                     () => {
-                        {
-                            let var = self.parse_atom(false).unwrap();
-                            if !matches!(var.data, NodeType::Variable(_)) {
-                                self.expected(var.pos, "variable", var.data);
-                            }
-                            vars.push(var);
+                        let var = self.parse_atom(false).unwrap();
+                        if !matches!(var.data, NodeType::Variable(_)) {
+                            self.expected(var.pos, "variable", var.data);
                         }
+                        vars.push(var);
                     }
                 }
 
