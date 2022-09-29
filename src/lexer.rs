@@ -207,7 +207,7 @@ impl Lexer {
         let mut identifier = String::from(first);
 
         while let Some(next) = self.next() {
-            if next.is_alphabetic() || (!identifier.is_empty() && next.is_ascii_digit()) {
+            if next.is_alphabetic() || !identifier.is_empty() && next.is_ascii_digit() {
                 identifier.push(next);
             } else {
                 break
@@ -547,30 +547,40 @@ impl Lexer {
     fn lex_number(&mut self, first: char) {
         let mut number = String::from(first);
         let mut float = false;
+        let mut scientific = false;
+        let mut scientific_op = false;
 
         while let Some(next) = self.next() {
             if !float && next == '.' && !self.floating_point_override {
                 float = true;
             }
+            
+            else if !scientific && next == 'e' {
+                float = true;
+                scientific = true;
+            }
 
-            // end number
-            else if !next.is_ascii_digit() { break }
+            else if scientific && !scientific_op && "+-".contains(next) {
+                scientific_op = true;
+            }
+            
+            else if !next.is_ascii_digit() {
+                self.prev();
+                break
+            }
 
             number.push(next)
         }
 
-        self.prev();
-
-        if number.ends_with('.') {
+        while !number.chars().last().unwrap().is_ascii_digit() {
             self.prev();
-            float = false;
             number.pop();
         }
 
-        if float {
-            self.push(TokenType::Float(number.parse().unwrap()));
-        } else {
+        if number.chars().all(|c| c.is_ascii_digit()) {
             self.push(TokenType::Integer(number.parse().unwrap()));
+        } else {
+            self.push(TokenType::Float(number.parse().unwrap()));
         }
     }
     

@@ -66,10 +66,10 @@ symbols! {
     // can't have any of these in binary_operators
     After {
         // string stuff
-        "`", "^^", "##", "#$", "_", "``", "$$", "@@", "..",
+        "^^", "##", "#$", "_", "``", "$$", "@@", "..",
 
         // number stuff
-        "$", "'", "-?",
+        "$", "'", "`", "-?",
     }
 
     Compare {

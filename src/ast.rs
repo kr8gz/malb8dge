@@ -32,7 +32,7 @@ pub enum NodeType {
     BinOp { a: BNode, op: String, b: BNode },
     AftOp { target: BNode, op: String },
     FnCall { target: BNode, args: VNode },  
-    Index { target: BNode, index: BNode },
+    Index { target: BNode, mode: IndexMode, index: BNode },
     Slice { target: BNode, start: ONode, stop: ONode, step: ONode },
     BracketThing { target: BNode, mode: IterMode, value: BNode },
     BraceThing { target: BNode, mode: IterMode },
@@ -93,19 +93,22 @@ impl Display for NodeType {
     }
 }
 
-macro_rules! iter_modes {
-    ( $( $name:ident: $sym:literal, )* ) => {
+macro_rules! enum_modes {
+    (
+        $name:ident
+        $( $var:ident: $sym:literal, )*
+    ) => {
         #[derive(Debug)]
-        pub enum IterMode {
-            $( $name, )*
+        pub enum $name {
+            $( $var, )*
             Default
         }
         
-        impl IterMode {
+        impl $name {
             pub fn from_token(t: &Token) -> Self {
                 if let TokenType::Symbol(sym) = &t.value {
                     match sym.as_str() {
-                        $( $sym => return Self::$name, )*
+                        $( $sym => return Self::$var, )*
                         _ => ()
                     }
                 }
@@ -115,29 +118,38 @@ macro_rules! iter_modes {
     }
 }
 
-iter_modes! {
-    // returns value    // fn behavior
-    Sum: "+",           // map
-    Product: "*",       // map
-    All: "&",           // map
-    AllBool: "&&",      // map
-    Any: "|",           // map
-    AnyBool: "||",      // map
-    AllEqual: "=",      // map
-    AllUnequal: "^",    // map
+enum_modes! {
+    IterMode
 
-    Min: ".",           // key
-    Max: "`",           // key
-    MostFreq: "#",      // key
+    // returns value
+    Sum: "+",
+    Product: "*",
+    All: "&",
+    AllBool: "&&",
+    Any: "|",
+    AnyBool: "||",
+    AllEqual: "=",
+    AllUnequal: "^",
+    Min: ".",
+    Max: "`",
+    MostFreq: "#",
 
     // returns list
-    Map: "~",           // map
-    Unique: "/",        // map
-    Print: ";",         // map
+    Map: "~",
+    Unique: "/",
+    Print: ";",
+    SortAsc: "<",
+    SortDesc: ">",
+    Filter: "-",
+}
 
-    SortAsc: "<",       // key
-    SortDesc: ">",      // key
-    Filter: "-",        // key
+enum_modes! {
+    IndexMode
+
+    Count: "$",
+    Contains: "?",
+    NotContains: "!",
+    IndexOf: "@",
 }
 
 #[derive(Debug)]

@@ -4,6 +4,8 @@ use crate::{ast::*, constants::*, lexer::*, errors::Error};
 
 #[derive(Debug)]
 pub struct Parser {
+    eof: Token,
+
     pub file: String,
     pub tokens: Vec<Token>,
 
@@ -17,7 +19,15 @@ pub struct Parser {
 
 impl Parser {
     pub fn new(lexer: Lexer) -> Self {
+        let eof_pos = lexer.tokens.last().map(|t| t.pos.end).unwrap_or(0);
+
         let mut parser = Self {
+            eof: Token {
+                value: TokenType::Eof,
+                macro_data: None,
+                pos: eof_pos..eof_pos,
+            },
+
             file: lexer.file,
             tokens: lexer.tokens,
 
@@ -70,14 +80,7 @@ impl Parser {
     }
 
     fn curr(&self) -> Token {
-        self.tokens.get(self.token_index - 1).cloned().unwrap_or_else(|| {
-            let eof = self.tokens.last().map(|t| t.pos.end).unwrap_or(0);
-            Token {
-                value: TokenType::Eof,
-                macro_data: None,
-                pos: eof..eof,
-            }
-        })
+        self.tokens.get(self.token_index - 1).cloned().unwrap_or_else(|| self.eof.clone())
     }
 
     fn prev(&mut self) {
@@ -114,8 +117,23 @@ impl Parser {
         }
 
         let data = match value {
-            TokenType::Integer(int) => NodeType::Integer(int), // TODO multiplying thing
-            TokenType::Float(float) => NodeType::Float(float), // TODO for floats too ig
+            TokenType::Integer(int) => {
+                let peek = self.peek().value;
+                if peek.is("(") || peek.is("[") || peek.is("{") || matches!(peek, TokenType::String(_) | TokenType::Identifier(_)) {
+                    NodeType::BinOp {
+                        a: Box::new(Node {
+                            data: NodeType::Integer(int),
+                            pos: pos.clone(),
+                        }),
+                        op: "*".into(),
+                        b: Box::new(self.parse_atom(false).unwrap()),
+                    }
+                } else {
+                    NodeType::Integer(int)
+                }
+            },
+
+            TokenType::Float(float) => NodeType::Float(float),
 
             TokenType::Identifier(id) => {
                 match Keyword::from_str(&id) {
@@ -135,7 +153,7 @@ impl Parser {
 
                     match expr {
                         Some(expr) => NodeType::Group(Box::new(expr)),
-                        None             => NodeType::List(Vec::new()),
+                        None => NodeType::List(Vec::new()),
                     }
                 },
 
@@ -229,8 +247,9 @@ impl Parser {
 
     fn parse_expression(&mut self, optional: bool) -> Option<Node> {
         let mut expr = self.parse_value(optional)?;
+        let expr_start = expr.pos.start;
 
-        if let Token { value: TokenType::Symbol(ref sym), pos, .. } = self.next() {
+        if let Token { value: TokenType::Symbol(ref sym), .. } = self.next() {
             macro_rules! is_stop {
                 ( $s:literal ) => {
                     matches!(self.stop, Some(s) if sym == s)
@@ -240,82 +259,7 @@ impl Parser {
             let data = match sym.as_str() {
                 "," => NodeType::List(self.parse_list(Some(expr))),
 
-                "~" => {
-                    let mut mode = IterMode::from_token(&self.next());
-                    if let IterMode::Default = mode { self.prev(); }
-                    
-                    let next = self.next();
-
-                    if next.value.is("[") {
-                        NodeType::While {
-                            cond: Box::new(expr),
-                            mode,
-                            block: Box::new(self.parse_statements(next.pos.start, "]")),
-                        }
-                    } else if next.value.is("?") {
-                        NodeType::While {
-                            cond: Box::new(expr),
-                            mode,
-                            block: Box::new(self.parse_statement(false).unwrap()),
-                        }
-                    } else if let IterMode::Default = mode {
-                        self.prev();
-                        if next.value.is("{") {
-                            NodeType::For {
-                                iter: Box::new(expr),
-                                vars: Vec::new(),
-                                mode,
-                                block: Box::new(self.parse_statement(false).unwrap()),
-                            }
-                        } else {
-                            macro_rules! parse_ident {
-                                () => {
-                                    {
-                                        let var = self.parse_atom(false).unwrap();
-                                        if !matches!(var.data, NodeType::Variable(_)) {
-                                            self.expected(var.pos, "variable", var.data);
-                                        }
-                                        var
-                                    }
-                                }
-                            }
-
-                            let mut vars = vec![parse_ident!()];
-
-                            loop {
-                                let next = self.next();
-                                mode = IterMode::from_token(&next);
-                                if let IterMode::Default = mode {
-                                    if next.value.is("{") {
-                                        self.prev();
-                                        break
-                                    } else if next.value.is(",") {
-                                        vars.push(parse_ident!());
-                                    } else {
-                                        self.expected(next.pos, "comma", next.value);
-                                    }
-                                } else {
-                                    break
-                                }
-                            }
-
-                            NodeType::For {
-                                iter: Box::new(expr),
-                                vars,
-                                mode,
-                                block: Box::new(self.parse_statement(false).unwrap())
-                            }
-                        }
-                    } else {
-                        self.prev();
-                        NodeType::For {
-                            iter: Box::new(expr),
-                            vars: Vec::new(),
-                            mode,
-                            block: Box::new(self.parse_statement(false).unwrap()),
-                        }
-                    }
-                },
+                "~" => self.parse_for_while_loop(expr),
 
                 "?"                   => self.parse_if(expr, false),
                 "!" if !is_stop!("!") => self.parse_if(expr, true),
@@ -333,7 +277,7 @@ impl Parser {
 
             expr = Node {
                 data,
-                pos: pos.start..self.pos_end(),
+                pos: expr_start..self.pos_end(),
             }
         } else {
             self.prev();
@@ -351,6 +295,72 @@ impl Parser {
 
         NodeType::FnDef {
             index: self.functions.len() - 1,
+        }
+    }
+
+    fn parse_for_while_loop(&mut self, expr: Node) -> NodeType {
+        let mut mode = IterMode::from_token(&self.next());
+        if let IterMode::Default = mode { self.prev(); }
+        
+        let next = self.next();
+
+        if next.value.is("[") {
+            return NodeType::While {
+                cond: Box::new(expr),
+                mode,
+                block: Box::new(self.parse_statements(next.pos.start, "]")),
+            }
+        } else if next.value.is("?") {
+            return NodeType::While {
+                cond: Box::new(expr),
+                mode,
+                block: Box::new(self.parse_statement(false).unwrap()),
+            }
+        }
+
+        self.prev();
+        let mut vars = Vec::new();
+        
+        if let IterMode::Default = mode {
+            if !next.value.is("{") {
+                macro_rules! parse_ident {
+                    () => {
+                        {
+                            let var = self.parse_atom(false).unwrap();
+                            if !matches!(var.data, NodeType::Variable(_)) {
+                                self.expected(var.pos, "variable", var.data);
+                            }
+                            vars.push(var);
+                        }
+                    }
+                }
+
+                parse_ident!();
+
+                loop {
+                    let next = self.next();
+                    mode = IterMode::from_token(&next);
+                    if let IterMode::Default = mode {
+                        if next.value.is("{") {
+                            self.prev();
+                            break
+                        } else if next.value.is(",") {
+                            parse_ident!();
+                        } else {
+                            self.expected(next.pos, "mode specifier, comma, or block", next.value);
+                        }
+                    } else {
+                        break
+                    }
+                }
+            }
+        }
+
+        NodeType::For {
+            iter: Box::new(expr),
+            vars,
+            mode,
+            block: Box::new(self.parse_statement(false).unwrap()),
         }
     }
     
@@ -513,6 +523,7 @@ impl Parser {
                     "." => NodeType::Index {
                         target: Box::new(parsed_value),
                         index: Box::new(self.parse_atom(false).unwrap()),
+                        mode: IndexMode::Default,
                     },
 
                     ":" => self.parse_fn_def(vec![parsed_value]),
