@@ -93,6 +93,14 @@ impl Parser {
         self.curr().pos.end
     }
 
+    fn with_stop<T, F: Fn(&mut Self) -> T>(&mut self, stop: Option<&'static str>, f: F) -> T {
+        let prev;
+        (self.stop, prev) = (stop, self.stop);
+        let ret = f(self);
+        self.stop = prev;
+        ret
+    }
+
     fn parse(&mut self) {
         while self.token_index < self.tokens.len() {
             if let Some(statement) = self.parse_statement(true) {
@@ -148,7 +156,7 @@ impl Parser {
 
             TokenType::Symbol(ref sym) => match sym.as_str() {
                 "(" => {
-                    let expr = self.parse_expression(true);
+                    let expr = self.with_stop(None, |s| s.parse_expression(true));
                     self.expected_sym(")");
 
                     match expr {
@@ -158,13 +166,15 @@ impl Parser {
                 },
 
                 "[" => {
-                    let list = self.parse_list(None);
+                    let list = self.with_stop(None, |s| s.parse_list(None));
                     self.expected_sym("]");
 
                     NodeType::List(list)
                 },
 
-                "{" => return Some(self.parse_statements(pos.start, "}")),
+                "{" => return Some(self.with_stop(
+                    None, |s| s.parse_statements(pos.start, "}")
+                )),
 
                 "?" => {
                     let mut mode = IterMode::from_token(&self.next());
@@ -308,7 +318,9 @@ impl Parser {
             return NodeType::While {
                 cond: Box::new(expr),
                 mode,
-                block: Box::new(self.parse_statements(next.pos.start, "]")),
+                block: Box::new(self.with_stop(
+                    None, |s| s.parse_statements(next.pos.start, "]")
+                )),
             }
         } else if next.value.is("?") {
             return NodeType::While {
@@ -370,10 +382,10 @@ impl Parser {
     }
 
     fn parse_if(&mut self, cond: Node, invert: bool) -> NodeType {
-        self.stop.replace("!");
-        let mut on_true = Some(self.parse_statement(false).unwrap());
+        let mut on_true = Some(self.with_stop(
+            Some("!"), |s| s.parse_statement(false).unwrap()
+        ));
         let mut on_false = None;
-        self.stop.take();
         
         if self.next().value.is("!") {
             on_false = Some(self.parse_statement(false).unwrap());
