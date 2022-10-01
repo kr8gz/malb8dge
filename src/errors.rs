@@ -49,16 +49,16 @@ impl ColorGenerator {
     }
 }
 
-pub struct Error<'a> {
-    file: &'a str,
+pub struct Error {
+    file: String,
     msg: String,
     labels: Vec<(Pos, String)>,
     help: Option<String>,
     note: Option<String>,
 }
 
-impl<'a> Error<'a> {
-    pub fn new(file: &'a str, msg: &str) -> Self {
+impl Error {
+    pub fn new<T: Into<String>>(file: String, msg: T) -> Self {
         Self {
             file,
             msg: msg.into(),
@@ -68,17 +68,17 @@ impl<'a> Error<'a> {
         }
     }
 
-    pub fn label(mut self, pos: Pos, msg: &str) -> Self {
+    pub fn label<T: Into<String>>(mut self, pos: Pos, msg: T) -> Self {
         self.labels.push((pos, msg.into()));
         self
     }
 
-    pub fn help(mut self, msg: &str) -> Self {
+    pub fn help<T: Into<String>>(mut self, msg: T) -> Self {
         self.help = Some(msg.into());
         self
     }
 
-    pub fn note(mut self, msg: &str) -> Self {
+    pub fn note<T: Into<String>>(mut self, msg: T) -> Self {
         self.note = Some(msg.into());
         self
     }
@@ -88,19 +88,31 @@ impl<'a> Error<'a> {
 
         let mut report = Report::build(
             ReportKind::Error,
-            self.file,
-            self.labels.iter().map(|label| label.0.start).min().unwrap_or(0)
+            &self.file,
+            self.labels.iter().map(|(pos, _)| pos.start).min().unwrap_or(0)
         )
         .with_config(Config::default().with_cross_gap(true))
         .with_message(self.msg);
 
-        for label in self.labels {
-            report = report.with_label(
-                Label::new((self.file, label.0))
-                .with_message(label.1)
-                .with_color(colgen.next())
-            );
-        }
+        if self.labels.len() == 1 {
+            for (pos, msg) in self.labels {
+                report = report.with_label(
+                    Label::new((&self.file, pos))
+                    .with_message(msg)
+                    .with_color(colgen.next())
+                );
+            }
+        } else {
+            for ((pos, msg), n) in self.labels.into_iter().zip(1..) {
+                let color = colgen.next();
+                report = report.with_label(
+                    Label::new((&self.file, pos))
+                        .with_message(format!("{}: {}", n.to_string().fg(color), msg))
+                        .with_order(n)
+                        .with_color(color)
+                );
+            }
+        };
 
         if let Some(help) = self.help {
             report = report.with_help(help);
@@ -112,7 +124,9 @@ impl<'a> Error<'a> {
 
         report
         .finish()
-        .eprint((self.file, Source::from(fs::read_to_string(self.file).unwrap())))
+        .eprint((&self.file, Source::from(
+            fs::read_to_string(&self.file).unwrap().replace('\r', "")
+        )))
         .unwrap();
 
         process::exit(1);

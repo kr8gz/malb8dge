@@ -21,13 +21,13 @@ pub enum NodeType {
     Break(ONode),
     Continue(ONode),
     Exit(ONode),
-    Assign { target: BNode, op: String, value: BNode },
+    Assign { target: BNode, op: String, value: BNode }, // non-empty op = augmented assignment
     MultipleAssign { targets: VNode, value: BNode },
     If { cond: BNode, on_true: ONode, on_false: ONode },
     For { iter: BNode, vars: VNode, mode: IterMode, block: BNode },   // x ~ [vars]  mode    ... // x ~ [vars]   [mode] { ... } //
     While { cond: BNode, mode: IterMode, block: BNode },              // x ~        [mode] ? ... // x ~          [mode] [ ... ] //
     Loop { mode: IterMode, block: BNode },                            //                   ? ... //            ? [mode] { ... } //
-    FnDef { index: usize }, // see Function struct
+    Function { index: usize }, // see FnDef struct
     BefOp { target: BNode, op: String },
     BinOp { a: BNode, op: String, b: BNode },
     AftOp { target: BNode, op: String },
@@ -38,7 +38,7 @@ pub enum NodeType {
     BraceThing { target: BNode, mode: IterMode },
     Replace { target: BNode, mode: ReplaceMode, pairs: Vec<(ReplaceValue, Option<ReplaceValue>)> },
     CharReplace { target: BNode, mode: ReplaceMode, pairs: Vec<(char, Option<char>)> },
-    Print { values: ONode, mode: PrintMode },
+    Print { value: ONode, mode: PrintMode },
     Input { prompt: ONode, mode: InputMode },
     IncrementBef { target: BNode, mode: IncrementMode },
     IncrementAft { target: BNode, mode: IncrementMode },
@@ -64,7 +64,7 @@ impl Display for NodeType {
             Self::For { .. } => "for loop".into(),
             Self::While { .. } => "while loop".into(),
             Self::Loop { .. } => "loop".into(),
-            Self::FnDef { .. } => "function definition".into(),
+            Self::Function { .. } => "function definition".into(),
             Self::BefOp { .. } | Self::BinOp { .. } | Self::AftOp { .. } => "expression".into(),
             Self::FnCall { .. } => "function call".into(),
             Self::Index { .. } => "index".into(),
@@ -202,16 +202,9 @@ macro_rules! keywords {
 keywords! { True, False, Null }
 
 #[derive(Debug)]
-pub struct Function {
-    pub args: Vec<ArgDef>,
+pub struct FnDef {
+    pub args: VNode,
     pub block: Node,
-}
-
-#[derive(Debug)]
-pub struct ArgDef {
-    pub name: String,
-    pub default: ONode,
-    pub pos: Pos,
 }
 
 #[derive(Debug)]

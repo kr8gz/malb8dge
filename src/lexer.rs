@@ -11,7 +11,7 @@ use crate::{constants::{self, *}, errors::*};
 /// ```
 macro_rules! fmt_plural {
     ( $s:literal, $n:expr ) => {
-        &format!($s, $n, if $n == 1 { "" } else { "s" })
+        format!($s, $n, if $n == 1 { "" } else { "s" })
     }
 }
 
@@ -52,7 +52,10 @@ impl Display for TokenType {
             Self::String(_) => "string".into(),
             Self::Integer(_) => "integer".into(),
             Self::Float(_) => "float".into(),
-            Self::Symbol(sym) => format!("'{sym}'"),
+            Self::Symbol(sym) => match sym.as_str() {
+                "\n" => "newline".into(),
+                _ => format!("'{sym}'")
+            },
             Self::Eof => "end of file".into(),
         })
     }
@@ -137,7 +140,7 @@ impl Lexer {
     pub fn from_str(file: String, code: String, offset: usize) -> Self {
         let mut lexer = Self {
             file,
-            chars: code.chars().collect(),
+            chars: code.chars().filter(|&c| c != '\r').collect(),
 
             char_index: 0,
             token_start: 0,
@@ -153,7 +156,7 @@ impl Lexer {
     }
 
     fn error(&self, msg: &str) -> Error {
-        Error::new(&self.file, msg)
+        Error::new(self.file.clone(), msg)
     }
     
     fn next(&mut self) -> Option<char> {
@@ -189,7 +192,7 @@ impl Lexer {
                 self.lex_number(next);
             }
 
-            else if !" \r\t".contains(next) {
+            else if !" \t".contains(next) {
                 self.lex_symbol(next);
             }
         }
@@ -564,13 +567,12 @@ impl Lexer {
                 scientific_op = true;
             }
             
-            else if !next.is_ascii_digit() {
-                self.prev();
-                break
-            }
+            else if !next.is_ascii_digit() { break }
 
             number.push(next)
         }
+        
+        self.prev();
 
         while !number.chars().last().unwrap().is_ascii_digit() {
             self.prev();

@@ -10,11 +10,15 @@ pub struct Parser {
     pub tokens: Vec<Token>,
 
     pub statements: Vec<Node>,
-    pub functions: Vec<Function>,
+    pub functions: Vec<FnDef>,
 
     token_index: usize,
 
-    stop: Option<&'static str>,
+    stop: Vec<&'static str>,
+    ignore_nl: bool,
+
+    in_func: bool,
+    in_loop: bool,
 }
 
 impl Parser {
@@ -36,27 +40,39 @@ impl Parser {
 
             token_index: 0,
 
-            stop: None,
+            stop: Vec::new(),
+            ignore_nl: false,
+
+            in_func: false,
+            in_loop: false,
         };
 
         parser.parse();
         parser
     }
 
+    // ------------------------------- error helper methods -------------------------------
     fn error(&self, msg: &str) -> Error {
-        Error::new(&self.file, msg)
+        Error::new(self.file.clone(), msg)
     }
 
-    fn expected<T: fmt::Display>(&mut self, pos: Pos, expected: &str, found: T) -> ! {
+    fn expected<T: fmt::Display>(&self, pos: Pos, expected: &str, found: T) -> ! {
         self.error("Syntax error")
-        .label(pos, &format!("Expected {}, found {}", expected, found))
+        .label(pos, format!("Expected {}, found {}", expected, found))
         .eprint();
     }
 
-    fn expected_sym(&mut self, sym: &str) {
+    fn expected_bracket(&mut self, open_pos: Pos, bracket: &str, has_value: bool) {
         let next = self.next();
-        if !next.value.is(sym) && !next.value.eof() {
-            self.expected(next.pos, &format!("'{sym}'"), next.value);
+        if !next.value.is(bracket) && !next.value.eof() {
+            self.error("Syntax error")
+            .label(open_pos, "Opening bracket here")
+            .label(next.pos, format!(
+                "Expected {} or '{bracket}', found {}",
+                if has_value { "value separator" } else { "value" },
+                next.value
+            ))
+            .eprint();
         }
     }
 
@@ -67,15 +83,51 @@ impl Parser {
         }
     }
 
+    fn check_vars(&self, mut node: Node, var_only: bool, found: &str, expected: &str) -> Node {
+        node.data = match node.data {
+            NodeType::Group(group) if !var_only => self.check_vars(*group, false, found, expected).data,
+            NodeType::List(list) if !var_only => NodeType::List(list.into_iter().map(|el| self.check_vars(el, true, found, expected)).collect()),
+            NodeType::Variable(var) if var != "&" && var != "~" => NodeType::Variable(var),
+            _ => {
+                self.error("Syntax error")
+                    .label(self.curr().pos, format!("Found {found} here"))
+                    .label(node.pos, format!("Expected {expected}, found {}", node.data))
+                    .eprint();
+            }
+        };
+        node
+    }
+
+    fn check_var_list(&self, nodes: Vec<Node>, found: &str, expected: &str) -> Vec<Node> {
+        let mut vars = Vec::new();
+        for node in nodes {
+            let node = self.check_vars(node, false, found, expected);
+            match node.data {
+                NodeType::List(mut list) => vars.append(&mut list),
+                NodeType::Variable(_) => vars.push(node),
+                _ => unreachable!()
+            }
+        }
+        vars
+    }
+
+    // ------------------------------- token iterator methods -------------------------------
     fn next(&mut self) -> Token {
         self.token_index += 1;
+        while self.ignore_nl && self.curr().value.is("\n") {
+            self.token_index += 1;
+        }
         self.curr()
     }
 
     fn peek(&mut self) -> Token {
+        let prev = self.token_index;
         self.token_index += 1;
+        while self.ignore_nl && self.curr().value.is("\n") {
+            self.token_index += 1;
+        }
         let token = self.curr();
-        self.token_index -= 1;
+        self.token_index = prev;
         token
     }
 
@@ -93,14 +145,52 @@ impl Parser {
         self.curr().pos.end
     }
 
-    fn with_stop<T, F: Fn(&mut Self) -> T>(&mut self, stop: Option<&'static str>, f: F) -> T {
-        let prev;
-        (self.stop, prev) = (stop, self.stop);
+    // ------------------------------- "bracketmanager" methods -------------------------------
+    fn with_stop<T, F: Fn(&mut Self) -> T>(&mut self, stop: &'static str, f: F) -> T {
+        self.with_stops(&[stop], f)
+    }
+
+    fn with_stops<T, F: Fn(&mut Self) -> T>(&mut self, stops: &[&'static str], f: F) -> T {
+        self.stop.extend(stops);
+        let ret = f(self);
+        self.stop.truncate(self.stop.len() - stops.len());
+        ret
+    }
+
+    fn reset_stops<T, F: Fn(&mut Self) -> T>(&mut self, f: F) -> T {
+        let mut prev = Vec::new();
+        prev.append(&mut self.stop);
         let ret = f(self);
         self.stop = prev;
         ret
     }
 
+    fn ignoring_nl<T, F: Fn(&mut Self) -> T>(&mut self, f: F) -> T {
+        let prev = self.ignore_nl;
+        self.ignore_nl = true;
+        let ret = f(self);
+        self.ignore_nl = prev;
+        ret
+    }
+
+    fn with_func<T, F: Fn(&mut Self) -> T>(&mut self, f: F) -> T {
+        let prev = (self.in_func, self.in_loop);
+        self.in_func = true;
+        self.in_loop = false;
+        let ret = f(self);
+        (self.in_func, self.in_loop) = prev;
+        ret
+    }
+
+    fn with_loop<T, F: Fn(&mut Self) -> T>(&mut self, f: F) -> T {
+        let prev = self.in_loop;
+        self.in_loop = true;
+        let ret = f(self);
+        self.in_loop = prev;
+        ret
+    }
+
+    // ------------------------------- parsing methods -------------------------------
     fn parse(&mut self) {
         while self.token_index < self.tokens.len() {
             if let Some(statement) = self.parse_statement(true) {
@@ -127,7 +217,11 @@ impl Parser {
         let data = match value {
             TokenType::Integer(int) => {
                 let peek = self.peek().value;
-                if peek.is("(") || peek.is("[") || peek.is("{") || matches!(peek, TokenType::String(_) | TokenType::Identifier(_)) {
+                if
+                    peek.is("(") || peek.is("[") || peek.is("{") ||
+                    peek.is("_") || peek.is("$") ||
+                    matches!(peek, TokenType::String(_) | TokenType::Identifier(_))
+                {
                     NodeType::BinOp {
                         a: Box::new(Node {
                             data: NodeType::Integer(int),
@@ -156,9 +250,12 @@ impl Parser {
 
             TokenType::Symbol(ref sym) => match sym.as_str() {
                 "(" => {
-                    let expr = self.with_stop(None, |s| s.parse_expression(true));
-                    self.expected_sym(")");
-
+                    let expr = self.reset_stops(|s| {
+                        s.ignoring_nl(|s| {
+                            s.parse_expression(true)
+                        })
+                    });
+                    self.expected_bracket(pos.clone(), ")", expr.is_some());
                     match expr {
                         Some(expr) => NodeType::Group(Box::new(expr)),
                         None => NodeType::List(Vec::new()),
@@ -166,15 +263,16 @@ impl Parser {
                 },
 
                 "[" => {
-                    let list = self.with_stop(None, |s| s.parse_list(None));
-                    self.expected_sym("]");
-
+                    let list = self.reset_stops(|s| {
+                        s.ignoring_nl(|s| {
+                            s.parse_list(None)
+                        })
+                    });
+                    self.expected_bracket(pos.clone(), "]", !list.is_empty());
                     NodeType::List(list)
                 },
 
-                "{" => return Some(self.with_stop(
-                    None, |s| s.parse_statements(pos.start, "}")
-                )),
+                "{" => return Some(self.reset_stops(|s| s.parse_statements(pos.start, "}"))),
 
                 "?" => {
                     let mut mode = IterMode::from_token(&self.next());
@@ -186,12 +284,12 @@ impl Parser {
 
                     NodeType::Loop {
                         mode,
-                        block: Box::new(self.parse_statement(false).unwrap()),
+                        block: Box::new(self.with_loop(|s| s.parse_statement(false).unwrap())),
                     }
                 },
 
                 ";" | "/" | "|" => NodeType::Print {
-                    values: Box::new(self.parse_expression(true)),
+                    value: Box::new(self.parse_expression(true)),
                     mode: match sym.as_str() {
                         ";" => PrintMode::Normal,
                         "/" => PrintMode::Spaces,
@@ -224,8 +322,8 @@ impl Parser {
 
                             if !matches!(val.data, NodeType::Variable(_) ) {
                                 self.error("Syntax error")
-                                .label(pos, &format!("Can only {verb} variables"))
-                                .label(val.pos, &format!("Expected variable, found {}", val.data))
+                                .label(pos, format!("Can only {verb} variables"))
+                                .label(val.pos, format!("Expected variable, found {}", val.data))
                                 .eprint();
                             }
 
@@ -260,23 +358,26 @@ impl Parser {
         let expr_start = expr.pos.start;
 
         if let Token { value: TokenType::Symbol(ref sym), .. } = self.next() {
-            macro_rules! is_stop {
-                ( $s:literal ) => {
-                    matches!(self.stop, Some(s) if sym == s)
-                }
-            }
-
             let data = match sym.as_str() {
-                "," => NodeType::List(self.parse_list(Some(expr))),
+                "," if !self.stop.contains(&",") => self.parse_maybe_list(Some(expr)),
 
                 "~" => self.parse_for_while_loop(expr),
 
-                "?"                   => self.parse_if(expr, false),
-                "!" if !is_stop!("!") => self.parse_if(expr, true),
+                "?" => self.parse_if(expr, false),
 
-                "=" => todo!("normal assignment"),
+                "!" if !self.stop.contains(&"!") => self.parse_if(expr, true),
 
-                op if BINARY_OPERATORS.contains(&&op[..op.len() - 1]) && op.ends_with('=') => todo!("augmented assignment"),
+                "=" if !self.stop.contains(&"=") => NodeType::Assign {
+                    target: Box::new(self.check_vars(expr, false, "assignment", "target variable(s)")),
+                    op: String::new(),
+                    value: Box::new(self.parse_expression(false).unwrap()),
+                },
+
+                op if BINARY_OPERATORS.contains(&&op[..op.len() - 1]) && op.ends_with('=') => NodeType::Assign {
+                    target: Box::new(self.check_vars(expr, true, "assignment", "target variable")),
+                    op: String::new(),
+                    value: Box::new(self.parse_expression(false).unwrap()),
+                },
 
                 op if BINARY_OPERATORS.contains(&op) => todo!("bin op"),
 
@@ -297,13 +398,13 @@ impl Parser {
     }
 
     fn parse_fn_def(&mut self, args: Vec<Node>) -> NodeType {
-        let f = Function {
-            args: Vec::new(), // TODO map Vec<Node> to Vec<ArgDef>
-            block: self.parse_statement(false).unwrap(),
+        let f = FnDef {
+            args: self.check_var_list(args, "function definition", "argument name"),
+            block: self.with_func(|s| s.parse_statement(false).unwrap()),
         };
-        self.functions.push(f);
 
-        NodeType::FnDef {
+        self.functions.push(f);
+        NodeType::Function {
             index: self.functions.len() - 1,
         }
     }
@@ -318,15 +419,17 @@ impl Parser {
             return NodeType::While {
                 cond: Box::new(expr),
                 mode,
-                block: Box::new(self.with_stop(
-                    None, |s| s.parse_statements(next.pos.start, "]")
-                )),
+                block: Box::new(self.with_loop(|s| {
+                    s.reset_stops(|s| {
+                        s.parse_statements(next.pos.start, "]")
+                    })
+                })),
             }
         } else if next.value.is("?") {
             return NodeType::While {
                 cond: Box::new(expr),
                 mode,
-                block: Box::new(self.parse_statement(false).unwrap()),
+                block: Box::new(self.with_loop(|s| s.parse_statement(false).unwrap())),
             }
         }
 
@@ -370,7 +473,7 @@ impl Parser {
             iter: Box::new(expr),
             vars,
             mode,
-            block: Box::new(self.parse_statement(false).unwrap()),
+            block: Box::new(self.with_loop(|s| s.parse_statement(false).unwrap())),
         }
     }
     
@@ -382,9 +485,7 @@ impl Parser {
     }
 
     fn parse_if(&mut self, cond: Node, invert: bool) -> NodeType {
-        let mut on_true = Some(self.with_stop(
-            Some("!"), |s| s.parse_statement(false).unwrap()
-        ));
+        let mut on_true = Some(self.with_stop("!", |s| s.parse_statement(false).unwrap()));
         let mut on_false = None;
         
         if self.next().value.is("!") {
@@ -405,13 +506,62 @@ impl Parser {
     }
 
     fn parse_list(&mut self, first: Option<Node>) -> Vec<Node> {
-        let mut list = first.into_iter().collect();
-        
-        // TODO
-        // this list can also act as function arg definitions or multiple assignment targets
-        // different unpack behavior
+        const STOPS: &[&str] = &[","];
+
+        let mut list: Vec<_> = first.into_iter().collect();
+
+        match self.with_stops(STOPS, |s| s.parse_expression(true)) {
+            Some(expr) => list.push(expr),
+            None => return list
+        }
+
+        loop {
+            if self.next().value.is(",") {
+                list.push(self.with_stops(STOPS, |s| s.parse_expression(false).unwrap()));
+            } else {
+                self.prev();
+                break
+            }
+        }
 
         list
+    }
+
+    fn parse_maybe_list(&mut self, first: Option<Node>) -> NodeType {
+        const STOPS: &[&str] = &[",", "=", ":"];
+
+        let mut list: Vec<_> = first.into_iter().collect();
+
+        match self.with_stops(STOPS, |s| s.parse_expression(true)) {
+            Some(expr) => list.push(expr),
+            None => return NodeType::List(list)
+        }
+
+        loop {
+            let next = self.next().value;
+
+            if next.is(",") {
+                list.push(self.with_stops(STOPS, |s| s.parse_expression(false).unwrap()));
+            }
+            
+            else if next.is("=") {
+                return NodeType::MultipleAssign {
+                    targets: self.check_var_list(list, "assignment", "target variable"),
+                    value: Box::new(self.parse_expression(false).unwrap()),
+                }
+            }
+            
+            else if next.is(":") {
+                return self.parse_fn_def(list)
+            }
+            
+            else {
+                self.prev();
+                break
+            }
+        }
+
+        NodeType::List(list)
     }
 
     fn parse_statement(&mut self, optional: bool) -> Option<Node> {
@@ -420,18 +570,32 @@ impl Parser {
         match value {
             TokenType::Symbol(sym) if matches!(sym.as_str(), "<" | "%" | ">" | "%%") => {
                 let expr = self.parse_expression(true);
+                let pos = pos.start..match expr {
+                    Some(ref expr) => expr.pos.end,
+                    None => pos.end,
+                };
+
+                macro_rules! check_scope {
+                    ( $stmt:ident, $cond:expr, $scope:literal ) => {
+                        if $cond {
+                            NodeType::$stmt(Box::new(expr))
+                        } else {
+                            self.error("Syntax error")
+                                .label(pos, format!("{} statement not in {}", stringify!($stmt), $scope))
+                                .eprint()
+                        }
+                    }
+                }
+
                 Some(Node {
-                    pos: pos.start..match expr {
-                        Some(ref expr) => expr.pos.end,
-                        None => pos.end,
-                    },
                     data: match sym.as_str() {
-                        "<" => NodeType::Return, // TODO (?) no return outside function
-                        "%" => NodeType::Break, // TODO (?) no break outside loop
-                        ">" => NodeType::Continue, // TODO (?) no continue outside loop
-                        "%%" => NodeType::Exit,
+                        "<" => check_scope!(Return, self.in_func, "function"),
+                        "%" => check_scope!(Break, self.in_loop, "loop"),
+                        ">" => check_scope!(Continue, self.in_loop, "loop"),
+                        "%%" => NodeType::Exit(Box::new(expr)),
                         _ => unreachable!()
-                    } (Box::new(expr)),
+                    },
+                    pos,
                 })
             },
 
@@ -445,7 +609,7 @@ impl Parser {
 
             _ => {
                 self.prev();
-                self.parse_expression(optional)
+                self.parse_expression(false)
             }
         }
     }
@@ -512,7 +676,18 @@ impl Parser {
                 },
 
                 TokenType::Symbol(ref sym) => match sym.as_str() {
-                    "(" => todo!("fn call"),
+                    "(" => NodeType::FnCall {
+                        target: Box::new(parsed_value),
+                        args: {
+                            let args = self.reset_stops(|s| {
+                                s.ignoring_nl(|s| {
+                                    s.parse_list(None)
+                                })
+                            });
+                            self.expected_bracket(pos.clone(), ")", !args.is_empty());
+                            args
+                        },
+                    },
 
                     "[" => todo!("index or weird bracket shit"),
 
@@ -536,7 +711,7 @@ impl Parser {
                         mode: IndexMode::Default,
                     },
 
-                    ":" => self.parse_fn_def(vec![parsed_value]),
+                    ":" if !self.stop.contains(&":") => self.parse_fn_def(vec![parsed_value]),
 
                     "++" | "--" => {
                         let (mode, verb) = match sym.as_str() {
@@ -550,8 +725,8 @@ impl Parser {
                             target: {
                                 if !matches!(parsed_value.data, NodeType::Variable(_) ) {
                                     self.error("Syntax error")
-                                    .label(pos, &format!("Can only {verb} variables"))
-                                    .label(parsed_value.pos, &format!("Expected variable, found {}", parsed_value.data))
+                                    .label(pos, format!("Can only {verb} variables"))
+                                    .label(parsed_value.pos, format!("Expected variable, found {}", parsed_value.data))
                                     .eprint();
                                 }
 
