@@ -98,8 +98,8 @@ impl Error {
             for (pos, msg) in self.labels {
                 report = report.with_label(
                     Label::new((&self.file, pos))
-                    .with_message(msg)
-                    .with_color(colgen.next())
+                        .with_message(msg)
+                        .with_color(colgen.next())
                 );
             }
         } else {
@@ -123,11 +123,11 @@ impl Error {
         }
 
         report
-        .finish()
-        .eprint((&self.file, Source::from(
-            fs::read_to_string(&self.file).unwrap().replace('\r', "")
-        )))
-        .unwrap();
+            .finish()
+            .eprint((&self.file, Source::from(
+                fs::read_to_string(&self.file).unwrap().replace('\r', "")
+            )))
+            .unwrap();
 
         process::exit(1);
     }

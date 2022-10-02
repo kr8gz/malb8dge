@@ -267,30 +267,30 @@ impl Lexer {
 
                 if replace_mode == ReplaceMode::Swap && pattern.len() != left_pattern.len() {
                     self.error("Different number of swap pattern values")
-                    .label(
-                        self.token_start + 1..separator_pos - 1, 
-                        fmt_plural!("Left side has {} value{}", left_pattern.len())
-                    )
-                    .label(
-                        separator_pos..self.actual_pos - 1,
-                        fmt_plural!("Right side has {} value{}", pattern.len())
-                    )
-                    .help("Add or remove some values to balance both sides")
-                    .eprint();
+                        .label(
+                            self.token_start + 1..separator_pos - 1, 
+                            fmt_plural!("Left side has {} value{}", left_pattern.len())
+                        )
+                        .label(
+                            separator_pos..self.actual_pos - 1,
+                            fmt_plural!("Right side has {} value{}", pattern.len())
+                        )
+                        .help("Add or remove some values to balance both sides")
+                        .eprint();
                 }
                 
                 else if pattern.len() > left_pattern.len() {
                     self.error("More replace values than find values")
-                    .label(
-                        self.token_start + 1..separator_pos - 1,
-                        fmt_plural!("Found {} find value{}", left_pattern.len())
-                    )
-                    .label(
-                        separator_pos..self.actual_pos - 1,
-                        fmt_plural!("Found {} replace value{}", pattern.len())
-                    )
-                    .help("Add more find values or remove some replace values")
-                    .eprint();
+                        .label(
+                            self.token_start + 1..separator_pos - 1,
+                            fmt_plural!("Found {} find value{}", left_pattern.len())
+                        )
+                        .label(
+                            separator_pos..self.actual_pos - 1,
+                            fmt_plural!("Found {} replace value{}", pattern.len())
+                        )
+                        .help("Add more find values or remove some replace values")
+                        .eprint();
                 }
 
                 self.push(TokenType::Replace(ReplaceData {
@@ -323,9 +323,9 @@ impl Lexer {
 
                 if pattern.is_empty() {
                     self.error("Find pattern cannot be empty")
-                    .label(self.token_start..self.actual_pos, "No find pattern provided")
-                    .help("Add a find pattern")
-                    .eprint();
+                        .label(self.token_start..self.actual_pos, "No find pattern provided")
+                        .help("Add a find pattern")
+                        .eprint();
                 }
 
                 left_pattern.append(&mut pattern);
@@ -366,9 +366,10 @@ impl Lexer {
 
         self.prev();
 
-        let mut err = self.error("Unclosed replace expression")
-        .label(self.token_start..self.actual_pos, "This replace expression hasn't been closed")
-        .label(self.actual_pos..self.actual_pos, "Expected another '\\' to finish it");
+        let mut err = self
+            .error("Unclosed replace expression")
+            .label(self.token_start..self.actual_pos, "This replace expression hasn't been closed")
+            .label(self.actual_pos..self.actual_pos, "Expected another '\\' to finish it");
 
         if self.tokens.iter().any(|t| matches!(t.value, TokenType::Replace(_) | TokenType::CharReplace(_))) {
             err = err.note("Check if you forgot to close an earlier one");
@@ -405,30 +406,30 @@ impl Lexer {
             else if step == ReplaceLexStep::RightPattern && next == '\\' {
                 if replace_mode == ReplaceMode::Swap && pattern.len() != left_pattern.len() {
                     self.error("Different number of swap pattern values")
-                    .label(
-                        self.token_start + 1..separator_pos - 1, 
-                        fmt_plural!("Left side has {} value{}", left_pattern.len())
-                    )
-                    .label(
-                        separator_pos..self.actual_pos - 1,
-                        fmt_plural!("Right side has {} value{}", pattern.len())
-                    )
-                    .help("Add or remove some values to balance both sides")
-                    .eprint();
+                        .label(
+                            self.token_start + 1..separator_pos - 1, 
+                            fmt_plural!("Left side has {} value{}", left_pattern.len())
+                        )
+                        .label(
+                            separator_pos..self.actual_pos - 1,
+                            fmt_plural!("Right side has {} value{}", pattern.len())
+                        )
+                        .help("Add or remove some values to balance both sides")
+                        .eprint();
                 }
                 
                 else if pattern.len() > left_pattern.len() {
                     self.error("More replace values than find values")
-                    .label(
-                        self.token_start + 1..separator_pos - 1,
-                        fmt_plural!("Found {} find value{}", left_pattern.len())
-                    )
-                    .label(
-                        separator_pos..self.actual_pos - 1,
-                        fmt_plural!("Found {} replace value{}", pattern.len())
-                    )
-                    .help("Add more find values or remove some replace values")
-                    .eprint();
+                        .label(
+                            self.token_start + 1..separator_pos - 1,
+                            fmt_plural!("Found {} find value{}", left_pattern.len())
+                        )
+                        .label(
+                            separator_pos..self.actual_pos - 1,
+                            fmt_plural!("Found {} replace value{}", pattern.len())
+                        )
+                        .help("Add more find values or remove some replace values")
+                        .eprint();
                 }
 
                 self.push(TokenType::CharReplace(CharReplaceData {
@@ -444,9 +445,9 @@ impl Lexer {
 
                 if pattern.is_empty() {
                     self.error("Find pattern cannot be empty")
-                    .label(self.token_start..self.actual_pos, "No find pattern provided")
-                    .help("Add a find pattern")
-                    .eprint();
+                        .label(self.token_start..self.actual_pos, "No find pattern provided")
+                        .help("Add a find pattern")
+                        .eprint();
                 }
                 
                 left_pattern.push_str(&pattern);
@@ -463,9 +464,10 @@ impl Lexer {
 
         self.prev();
 
-        let mut err = self.error("Unclosed replace expression")
-        .label(self.token_start..self.actual_pos, "This replace expression hasn't been closed")
-        .label(self.actual_pos..self.actual_pos, "Expected another '\\' to finish it");
+        let mut err = self
+            .error("Unclosed replace expression")
+            .label(self.token_start..self.actual_pos, "This replace expression hasn't been closed")
+            .label(self.actual_pos..self.actual_pos, "Expected another '\\' to finish it");
 
         if self.tokens.iter().any(|t| matches!(t.value, TokenType::Replace(_) | TokenType::CharReplace(_))) {
             err = err.note("Check if you forgot to close an earlier one");
@@ -536,9 +538,10 @@ impl Lexer {
 
         self.prev();
 
-        let mut err = self.error("Unclosed string")
-        .label(self.token_start..self.actual_pos, "This string hasn't been closed")
-        .label(self.actual_pos..self.actual_pos, "Expected another '\"' to finish it");
+        let mut err = self
+            .error("Unclosed string")
+            .label(self.token_start..self.actual_pos, "This string hasn't been closed")
+            .label(self.actual_pos..self.actual_pos, "Expected another '\"' to finish it");
 
         if self.tokens.iter().any(|t| matches!(t.value, TokenType::String(_))) {
             err = err.note("Check if you forgot to close an earlier string");

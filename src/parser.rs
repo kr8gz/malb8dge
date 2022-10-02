@@ -58,21 +58,21 @@ impl Parser {
 
     fn expected<T: fmt::Display>(&self, pos: Pos, expected: &str, found: T) -> ! {
         self.error("Syntax error")
-        .label(pos, format!("Expected {}, found {}", expected, found))
-        .eprint();
+            .label(pos, format!("Expected {}, found {}", expected, found))
+            .eprint();
     }
 
     fn expected_bracket(&mut self, open_pos: Pos, bracket: &str, has_value: bool) {
         let next = self.next();
         if !next.value.is(bracket) && !next.value.eof() {
             self.error("Syntax error")
-            .label(open_pos, "Opening bracket here")
-            .label(next.pos, format!(
-                "Expected {} or '{bracket}', found {}",
-                if has_value { "value separator" } else { "value" },
-                next.value
-            ))
-            .eprint();
+                .label(open_pos, "Opening bracket here")
+                .label(next.pos, format!(
+                    "Expected {} or '{bracket}', found {}",
+                    if has_value { "value separator" } else { "value" },
+                    next.value
+                ))
+                .eprint();
         }
     }
 
@@ -289,7 +289,28 @@ impl Parser {
                 },
 
                 ";" | "/" | "|" => NodeType::Print {
-                    value: Box::new(self.parse_expression(true)),
+                    value: {
+                        let start = self.peek().pos.start;
+                        let mut list = self.parse_list(None);
+                        let pos = start..self.pos_end();
+
+                        Box::new(
+                            if list.is_empty() {
+                                None
+                            } else {
+                                Some(Node {
+                                    pos,
+                                    data: {
+                                        if list.len() == 1 && !matches!(list[0].data, NodeType::List(_)) {
+                                            list.remove(0).data
+                                        } else {
+                                            NodeType::List(list)
+                                        }
+                                    },
+                                })
+                            }
+                        )
+                    },
                     mode: match sym.as_str() {
                         ";" => PrintMode::Normal,
                         "/" => PrintMode::Spaces,
@@ -322,9 +343,9 @@ impl Parser {
 
                             if !matches!(val.data, NodeType::Variable(_) ) {
                                 self.error("Syntax error")
-                                .label(pos, format!("Can only {verb} variables"))
-                                .label(val.pos, format!("Expected variable, found {}", val.data))
-                                .eprint();
+                                    .label(pos, format!("Can only {verb} variables"))
+                                    .label(val.pos, format!("Expected variable, found {}", val.data))
+                                    .eprint();
                             }
 
                             Box::new(val)
@@ -725,9 +746,9 @@ impl Parser {
                             target: {
                                 if !matches!(parsed_value.data, NodeType::Variable(_) ) {
                                     self.error("Syntax error")
-                                    .label(pos, format!("Can only {verb} variables"))
-                                    .label(parsed_value.pos, format!("Expected variable, found {}", parsed_value.data))
-                                    .eprint();
+                                        .label(pos, format!("Can only {verb} variables"))
+                                        .label(parsed_value.pos, format!("Expected variable, found {}", parsed_value.data))
+                                        .eprint();
                                 }
 
                                 Box::new(parsed_value)
@@ -758,12 +779,7 @@ impl Parser {
 
 fn zip_longer<T>(longer: Vec<T>, shorter: Vec<T>) -> Vec<(T, Option<T>)> {
     longer
-    .into_iter()
-    .zip(
-        shorter
         .into_iter()
-        .map(Some)
-        .chain(iter::repeat_with(|| None))
-    )
-    .collect()
+        .zip(shorter.into_iter().map(Some).chain(iter::repeat_with(|| None)))
+        .collect()
 }
