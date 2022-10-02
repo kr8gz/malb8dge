@@ -289,28 +289,25 @@ impl Parser {
                 },
 
                 ";" | "/" | "|" => NodeType::Print {
-                    value: {
+                    value: Box::new({
                         let start = self.peek().pos.start;
                         let mut list = self.parse_list(None);
-                        let pos = start..self.pos_end();
 
-                        Box::new(
-                            if list.is_empty() {
-                                None
-                            } else {
-                                Some(Node {
-                                    pos,
-                                    data: {
-                                        if list.len() == 1 && !matches!(list[0].data, NodeType::List(_)) {
-                                            list.remove(0).data
-                                        } else {
-                                            NodeType::List(list)
-                                        }
-                                    },
-                                })
-                            }
-                        )
-                    },
+                        if list.is_empty() {
+                            None
+                        } else {
+                            Some(Node {
+                                data: {
+                                    if list.len() > 1 || matches!(list[0].data, NodeType::List(_)) {
+                                        NodeType::List(list)
+                                    } else {
+                                        list.remove(0).data
+                                    }
+                                },
+                                pos: start..self.pos_end(),
+                            })
+                        }
+                    }),
                     mode: match sym.as_str() {
                         ";" => PrintMode::Normal,
                         "/" => PrintMode::Spaces,
@@ -693,7 +690,7 @@ impl Parser {
                 TokenType::CharReplace(rd) => NodeType::CharReplace {
                     target: Box::new(parsed_value),
                     mode: rd.mode,
-                    pairs: zip_longer(rd.left.chars().collect(), rd.right.chars().collect()),
+                    pairs: zip_longer(rd.left, rd.right),
                 },
 
                 TokenType::Symbol(ref sym) => match sym.as_str() {
@@ -777,7 +774,7 @@ impl Parser {
     }
 }
 
-fn zip_longer<T>(longer: Vec<T>, shorter: Vec<T>) -> Vec<(T, Option<T>)> {
+fn zip_longer<T>(longer: Vec<T>, shorter: Vec<T>) -> ZipLonger<T> {
     longer
         .into_iter()
         .zip(shorter.into_iter().map(Some).chain(iter::repeat_with(|| None)))

@@ -1,6 +1,7 @@
 use std::ops::Range;
 
 pub type Pos = Range<usize>;
+pub type ZipLonger<T> = Vec<(T, Option<T>)>;
 
 macro_rules! symbols {
     (

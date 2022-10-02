@@ -201,9 +201,9 @@ mod tests {
 
         TokenType::Identifier("s".into()),              0..1
 
-        TokenType::CharReplace(CharReplaceData {
-            left: "ab,cd".into(),
-            right: "ef,gh".into(),
+        TokenType::CharReplace(ReplaceData {
+            left: "ab,cd".chars().collect(),
+            right: "ef,gh".chars().collect(),
             mode: ReplaceMode::Normal,
         }),                                             1..15
     }
@@ -285,9 +285,9 @@ mod tests {
         "s\\\\``,`\\,`|,`!,`@,`{,`},`,\\\\"
 
         TokenType::Identifier("s".into()),              0..1
-        TokenType::CharReplace(CharReplaceData {
-            left: "`,\\,|,!,@,`{,`},`,".into(),
-            right: "".into(),
+        TokenType::CharReplace(ReplaceData {
+            left: "`,\\,|,!,@,`{,`},`,".chars().collect(),
+            right: "".chars().collect(),
             mode: ReplaceMode::Normal,
         }),                                             1..28
     }

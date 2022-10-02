@@ -6,8 +6,6 @@ type BNode = Box<Node>;
 type ONode = Box<Option<Node>>;
 type VNode = Vec<Node>;
 
-type ReplaceValue = Vec<ParsedFragment>;
-
 #[derive(Debug)]
 pub struct Node {
     pub data: NodeType,
@@ -24,9 +22,9 @@ pub enum NodeType {
     Assign { target: BNode, op: String, value: BNode }, // non-empty op = augmented assignment
     MultipleAssign { targets: VNode, value: BNode },
     If { cond: BNode, on_true: ONode, on_false: ONode },
-    For { iter: BNode, vars: VNode, mode: IterMode, block: BNode },   // x ~ [vars]  mode    ... // x ~ [vars]   [mode] { ... } //
-    While { cond: BNode, mode: IterMode, block: BNode },              // x ~        [mode] ? ... // x ~          [mode] [ ... ] //
-    Loop { mode: IterMode, block: BNode },                            //                   ? ... //            ? [mode] { ... } //
+    For { iter: BNode, vars: VNode, mode: IterMode, block: BNode }, // x ~ [vars]  mode    ... // x ~ [vars]   [mode] { ... } //
+    While { cond: BNode, mode: IterMode, block: BNode },            // x ~        [mode] ? ... // x ~          [mode] [ ... ] //
+    Loop { mode: IterMode, block: BNode },                          //                   ? ... //            ? [mode] { ... } //
     Function { index: usize }, // see FnDef struct
     BefOp { target: BNode, op: String },
     BinOp { a: BNode, op: String, b: BNode },
@@ -36,8 +34,8 @@ pub enum NodeType {
     Slice { target: BNode, start: ONode, stop: ONode, step: ONode },
     BracketThing { target: BNode, mode: IterMode, value: BNode },
     BraceThing { target: BNode, mode: IterMode },
-    Replace { target: BNode, mode: ReplaceMode, pairs: Vec<(ReplaceValue, Option<ReplaceValue>)> },
-    CharReplace { target: BNode, mode: ReplaceMode, pairs: Vec<(char, Option<char>)> },
+    Replace { target: BNode, mode: ReplaceMode, pairs: ZipLonger<Vec<ParsedFragment>> },
+    CharReplace { target: BNode, mode: ReplaceMode, pairs: ZipLonger<char> },
     Print { value: ONode, mode: PrintMode },
     Input { prompt: ONode, mode: InputMode },
     IncrementBef { target: BNode, mode: IncrementMode },
