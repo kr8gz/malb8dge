@@ -21,5 +21,9 @@ fn main() {
         process::exit(1);
     });
     
-    dbg!(parser::Parser::new(lexer::Lexer::from_file(file)));
+    let lexer = lexer::Lexer::from_file(file);
+    
+    let parser = parser::Parser::new(lexer);
+
+    println!("{:#?}", &parser);
 }

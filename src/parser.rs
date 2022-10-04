@@ -338,7 +338,7 @@ impl Parser {
                         mode,
                         target: {
                             let val = self.parse_value(false).unwrap();
-                            if !matches!(val.data, NodeType::Variable(_) ) {
+                            if !matches!(val.data, NodeType::Variable(_) | NodeType::Index { .. } ) {
                                 self.error("Syntax error")
                                     .label(pos, format!("Found {verb} operator here"))
                                     .label(val.pos, format!("Expected variable, found {}", val.data))
@@ -754,17 +754,39 @@ impl Parser {
                 },
 
                 TokenType::Symbol(ref sym) => match sym.as_str() {
-                    "(" => NodeType::FnCall {
-                        target: Box::new(parsed_value),
-                        args: {
-                            let args = self.reset_stops(|s| {
-                                s.ignoring_nl(|s| {
-                                    s.parse_list(None)
-                                })
-                            });
-                            self.expected_bracket(pos.clone(), ")", !args.is_empty());
-                            args
-                        },
+                    "(" => if let NodeType::Input { mut prompt, mode } = parsed_value.data {
+                        if prompt.is_some() {
+                            self.error("Syntax error")
+                                .label(parsed_value.pos, "Found input with prompt here")
+                                .label(pos, "Tried to specify another prompt")
+                                .help("Remove the extra prompt")
+                                .eprint();
+                        }
+
+                        let mut expr = self.reset_stops(|s| {
+                            s.ignoring_nl(|s| {
+                                s.parse_expression(false).unwrap()
+                            })
+                        });
+                        self.expected_bracket(pos.clone(), ")", true);
+
+                        expr.pos = pos.start..self.pos_end();
+                        parsed_value.pos.end = expr.pos.end;
+                        prompt = Box::new(Some(expr));
+                        NodeType::Input { prompt, mode }
+                    } else {
+                        NodeType::FnCall {
+                            target: Box::new(parsed_value),
+                            args: {
+                                let args = self.reset_stops(|s| {
+                                    s.ignoring_nl(|s| {
+                                        s.parse_list(None)
+                                    })
+                                });
+                                self.expected_bracket(pos.clone(), ")", !args.is_empty());
+                                args
+                            },
+                        }
                     },
 
                     "[" => {
@@ -795,7 +817,6 @@ impl Parser {
                                         } else {
                                             NodeType::Index {
                                                 target: Box::new(parsed_value),
-                                                mode: IndexMode::Default,
                                                 index: Box::new(values[0].take().unwrap_or_else(
                                                     || self.expected(token.pos, "value", token.value).eprint()
                                                 )),
@@ -833,10 +854,10 @@ impl Parser {
                                     can_add_expr = token.value.is(",");
                                 }
                             } else {
-                                NodeType::Index {
+                                NodeType::BracketIndex {
                                     target: Box::new(parsed_value),
                                     mode: index_mode,
-                                    index: Box::new(self.reset_stops(|s| {
+                                    value: Box::new(self.reset_stops(|s| {
                                         s.ignoring_nl(|s| {
                                             let expr = s.parse_expression(false).unwrap();
                                             s.expected_bracket(pos.clone(), "]", true);
@@ -857,7 +878,7 @@ impl Parser {
                             self.expected_bracket(pos.clone(), "]", true);
 
                             self.functions.push(f);
-                            NodeType::BracketThing {
+                            NodeType::BracketIter {
                                 target: Box::new(parsed_value),
                                 mode: iter_mode,
                                 fn_index: self.functions.len() - 1,
@@ -882,7 +903,6 @@ impl Parser {
                     "." => NodeType::Index {
                         target: Box::new(parsed_value),
                         index: Box::new(self.parse_atom(false).unwrap()),
-                        mode: IndexMode::Default,
                     },
 
                     ":" if !self.stop.contains(&":") => self.parse_fn_def(vec![parsed_value]),
@@ -897,7 +917,7 @@ impl Parser {
                         NodeType::IncrementAft {
                             mode,
                             target: {
-                                if !matches!(parsed_value.data, NodeType::Variable(_) ) {
+                                if !matches!(parsed_value.data, NodeType::Variable(_) | NodeType::Index { .. } ) {
                                     self.error("Syntax error")
                                         .label(pos, format!("Found {verb} operator here"))
                                         .label(parsed_value.pos, format!("Expected variable, found {}", parsed_value.data))

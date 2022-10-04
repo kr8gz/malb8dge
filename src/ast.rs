@@ -31,9 +31,10 @@ pub enum NodeType {
     AftOp { target: BNode, op: String },
     Compare { first: BNode, chain: Vec<(String, BNode)> },
     FnCall { target: BNode, args: VNode },
-    Index { target: BNode, mode: IndexMode, index: BNode },
+    Index { target: BNode, index: BNode },
     Slice { target: BNode, start: ONode, stop: ONode, step: ONode },
-    BracketThing { target: BNode, mode: IterMode, fn_index: usize },
+    BracketIndex { target: BNode, mode: IndexMode, value: BNode }, // index of, count, contains, ...
+    BracketIter { target: BNode, mode: IterMode, fn_index: usize }, // sum, filter, print, ...
     BraceThing { target: BNode, mode: IterMode },
     Replace { target: BNode, mode: ReplaceMode, pairs: ZipLonger<Vec<ParsedFragment>> },
     CharReplace { target: BNode, mode: ReplaceMode, pairs: ZipLonger<char> },
@@ -68,7 +69,8 @@ impl Display for NodeType {
             Self::Compare { .. } => "comparison".into(),
             Self::FnCall { .. } => "function call".into(),
             Self::Index { .. } => "index".into(),
-            Self::BracketThing { .. } => "bracket thing".into(),
+            Self::BracketIndex { .. } => "bracket indexing thing".into(),
+            Self::BracketIter { .. } => "bracket iterating thing".into(),
             Self::Slice { .. } => "slice".into(),
             Self::BraceThing { .. } => "brace thing".into(),
             Self::Replace { .. } | Self::CharReplace { .. } => "replace expression".into(),
