@@ -18,9 +18,11 @@ macro_rules! operators {
         $( $type:ident: $( $op:literal ),+, )*
     ) => {
         use OpType::*;
-                                                        // - 2 because After and Other aren't counted
-        pub const MAX_PREC: usize = [ $( $type, )* ].len() - 2;
+
         const OP_TABLE: &[(OpType, &str)] = &[ $( $( ($type, $op), )+ )* ];
+        const PREC_LIST: &[OpType] = &[ $( $type, )* ];
+                                                 // - 2 because After and Other aren't counted
+        pub const MAX_PREC: usize = PREC_LIST.len() - 2;
 
         pub fn is_sym(sym: &str) -> bool {
             [ $( $( $op, )+ )* ].contains(&sym)
@@ -39,11 +41,6 @@ macro_rules! operators {
             )*
             usize::MAX
         }
-
-        pub fn prec_type(prec: usize) -> OpType {
-            assert!(0 < prec && prec <= MAX_PREC);
-            [ $( $type, )* ][prec - 1]
-        }
     }
 }
 
@@ -52,7 +49,15 @@ pub fn is_op(op_type: OpType, op: &str) -> bool {
 }
 
 pub fn is_bin_op(op: &str) -> bool {
-    OP_TABLE.contains(&(LeftAssoc, op)) || OP_TABLE.contains(&(RightAssoc, op))
+    is_op(LeftAssoc, op) || is_op(RightAssoc, op)
+}
+
+pub fn prec_type(prec: usize) -> OpType {
+    PREC_LIST[prec - 1]
+}
+
+pub fn is_bin_type(op_type: OpType) -> bool {
+    matches!(op_type, LeftAssoc | RightAssoc | Compare)
 }
 
 // precedence goes from top to bottom, same row = same precedence
@@ -67,8 +72,7 @@ operators! {
     Compare:    "<", ">", "<=", ">=", "!=", "==",
     LeftAssoc:  "-?",
 
-    LeftAssoc:  "#",
-    LeftAssoc:  "..",
+    LeftAssoc:  "..", "#",
     Before:     "^",
 
     LeftAssoc:  "??",
@@ -76,13 +80,10 @@ operators! {
 
     LeftAssoc:  "%",
     LeftAssoc:  "+", "-",
-
-    Before:     ".", "`", "``",
-
     LeftAssoc:  "*", "/", "/.",
     LeftAssoc:  "+-", "/%",
 
-    Before:     "-",
+    Before:     "-", ".", "`", "``",
 
     RightAssoc: "^",
 
@@ -94,6 +95,6 @@ operators! {
     Before:     "@", "^^", "#", "'",
 
     // no precedence
-    After:      "^^", "^\\", "##", "#$", "_", "``", "$$", "$", "'", "`", "..",
+    After:      "^^", "^\\", "##", "#$", "_", "``", "$$", "$", "'", "`",
     Other:      "++", "--", "%%",
 }
