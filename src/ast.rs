@@ -25,7 +25,7 @@ pub enum NodeType {
     For { iter: BNode, vars: VNode, mode: IterMode, block: BNode }, // x ~ [vars]  mode    ... // x ~ [vars]   [mode] { ... } //
     While { cond: BNode, mode: IterMode, block: BNode },            // x ~        [mode] ? ... // x ~          [mode] [ ... ] //
     Loop { mode: IterMode, block: BNode },                          //                   ? ... //            ? [mode] { ... } //
-    Function { index: usize }, // see FnDef struct
+    Function { args: VNode, block: BNode },
     BefOp { target: BNode, op: String },
     BinOp { a: BNode, op: String, b: BNode },
     AftOp { target: BNode, op: String },
@@ -34,7 +34,7 @@ pub enum NodeType {
     Index { target: BNode, index: BNode },
     Slice { target: BNode, start: ONode, stop: ONode, step: ONode },
     BracketIndex { target: BNode, mode: IndexMode, value: BNode }, // index of, count, contains, ...
-    BracketIter { target: BNode, mode: IterMode, fn_index: usize }, // sum, filter, print, ...
+    BracketIter { target: BNode, mode: IterMode, expr: BNode }, // sum, filter, print, ...
     BraceThing { target: BNode, mode: IterMode },
     Replace { target: BNode, mode: ReplaceMode, pairs: ZipLonger<Vec<ParsedFragment>> },
     CharReplace { target: BNode, mode: ReplaceMode, pairs: ZipLonger<char> },
@@ -202,12 +202,6 @@ macro_rules! keywords {
 }
 
 keywords! { True, False, Null }
-
-#[derive(Debug)]
-pub struct FnDef {
-    pub args: VNode,
-    pub block: Node,
-}
 
 #[derive(Debug)]
 pub enum ParsedFragment {

@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod lexer {
     use crate::lexer::*;
 
     const FILENAME: &str = "<test>.mlb8";

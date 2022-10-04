@@ -1,6 +1,6 @@
 use std::{env, process};
 
-use ariadne::{Fmt, Color};
+use ariadne::{Color, Fmt};
 
 mod ast;
 mod util;
@@ -8,7 +8,7 @@ mod errors;
 
 mod lexer;
 mod parser;
-mod interpreter;
+mod compiler;
 
 mod tests;
 
@@ -18,7 +18,7 @@ fn main() {
 
     let file = args.next().unwrap_or_else(|| {
         eprintln!("{} Missing required argument: filename", "Error:".fg(Color::Red));
-        process::exit(1);
+        process::exit(1)
     });
     
     let lexer = lexer::Lexer::from_file(file);

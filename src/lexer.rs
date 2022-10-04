@@ -500,11 +500,21 @@ impl Lexer {
             number.pop();
         }
 
-        if number.chars().all(|c| c.is_ascii_digit()) {
-            self.push(TokenType::Integer(number.parse().unwrap()));
-        } else {
-            self.push(TokenType::Float(number.parse().unwrap()));
-        }
+
+        self.push(match number.parse() {
+            Ok(n) => TokenType::Integer(n),
+            Err(_) => {
+                match number.parse() {
+                    Ok(n) => TokenType::Float(n),
+                    Err(_) => {
+                        self.error("wtf error")
+                            .label(self.token_start..self.actual_pos, "what did you do")
+                            .help("stop")
+                            .eprint();
+                    }
+                }
+            }
+        });
     }
     
     fn lex_symbol(&mut self, first: char) {

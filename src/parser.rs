@@ -10,7 +10,6 @@ pub struct Parser {
     pub tokens: Vec<Token>,
 
     pub statements: Vec<Node>,
-    pub functions: Vec<FnDef>,
 
     token_index: usize,
 
@@ -36,7 +35,6 @@ impl Parser {
             tokens: lexer.tokens,
 
             statements: Vec::new(),
-            functions: Vec::new(),
 
             token_index: 0,
 
@@ -412,14 +410,9 @@ impl Parser {
     }
 
     fn parse_fn_def(&mut self, args: Vec<Node>) -> NodeType {
-        let f = FnDef {
-            args: self.check_var_list(args, "function definition", "argument name"),
-            block: self.with_func(|s| s.parse_statement(false).unwrap()),
-        };
-
-        self.functions.push(f);
         NodeType::Function {
-            index: self.functions.len() - 1,
+            args: self.check_var_list(args, "function definition", "argument name"),
+            block: Box::new(self.with_func(|s| s.parse_statement(false).unwrap())),
         }
     }
 
@@ -867,21 +860,14 @@ impl Parser {
                                 }
                             }
                         } else {
-                            let f = FnDef {
-                                args: vec![Node {
-                                    data: NodeType::Variable("~".into()),
-                                    pos: self.eof.pos.clone(),
-                                }],
-                                block: self.reset_stops(|s| s.parse_statement(false).unwrap()),
-                            };
-
-                            self.expected_bracket(pos.clone(), "]", true);
-
-                            self.functions.push(f);
                             NodeType::BracketIter {
                                 target: Box::new(parsed_value),
                                 mode: iter_mode,
-                                fn_index: self.functions.len() - 1,
+                                expr: {
+                                    let expr = Box::new(self.reset_stops(|s| s.parse_expression(false).unwrap()));
+                                    self.expected_bracket(pos.clone(), "]", true);
+                                    expr
+                                },
                             }
                         }
                     },
