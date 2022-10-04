@@ -1,6 +1,6 @@
 use std::{iter, fmt};
 
-use crate::{ast::*, constants::*, lexer::*, errors::Error};
+use crate::{ast::*, util, util::{*, OpType::*}, lexer::*, errors::Error};
 
 #[derive(Debug)]
 pub struct Parser {
@@ -56,10 +56,9 @@ impl Parser {
         Error::new(self.file.clone(), msg)
     }
 
-    fn expected<T: fmt::Display>(&self, pos: Pos, expected: &str, found: T) -> ! {
+    fn expected<T: fmt::Display>(&self, pos: Pos, expected: &str, found: T) -> Error {
         self.error("Syntax error")
             .label(pos, format!("Expected {}, found {}", expected, found))
-            .eprint();
     }
 
     fn expected_bracket(&mut self, open_pos: Pos, bracket: &str, has_value: bool) {
@@ -79,14 +78,15 @@ impl Parser {
     fn statement_sep(&mut self) {
         let next = self.next();
         if !next.value.is("\n") && !next.value.is(";") && !next.value.eof() {
-            self.expected(next.pos, "statement terminator", next.value)
+            self.expected(next.pos, "statement terminator", next.value).eprint()
         }
     }
 
-    fn check_vars(&self, mut node: Node, var_only: bool, found: &str, expected: &str) -> Node {
+    fn check_vars(&self, mut node: Node, allow_list: bool, found: &str, expected: &str) -> Node {
         node.data = match node.data {
-            NodeType::Group(group) if !var_only => self.check_vars(*group, false, found, expected).data,
-            NodeType::List(list) if !var_only => NodeType::List(list.into_iter().map(|el| self.check_vars(el, true, found, expected)).collect()),
+            NodeType::Group(group) => self.check_vars(*group, allow_list, found, expected).data,
+            NodeType::List(list) if allow_list => NodeType::List(list.into_iter().map(|el| self.check_vars(el, false, found, expected)).collect()),
+            ind @ NodeType::Index { .. } => ind,
             NodeType::Variable(var) if var != "&" && var != "~" => NodeType::Variable(var),
             _ => {
                 self.error("Syntax error")
@@ -101,7 +101,7 @@ impl Parser {
     fn check_var_list(&self, nodes: Vec<Node>, found: &str, expected: &str) -> Vec<Node> {
         let mut vars = Vec::new();
         for node in nodes {
-            let node = self.check_vars(node, false, found, expected);
+            let node = self.check_vars(node, true, found, expected);
             match node.data {
                 NodeType::List(mut list) => vars.append(&mut list),
                 NodeType::Variable(_) => vars.push(node),
@@ -209,7 +209,7 @@ impl Parser {
                     self.prev();
                     return None
                 } else {
-                    self.expected(pos, "value", value);
+                    self.expected(pos, "value", value).eprint();
                 }
             }
         }
@@ -222,14 +222,17 @@ impl Parser {
                     peek.is("_") || peek.is("$") ||
                     matches!(peek, TokenType::String(_) | TokenType::Identifier(_))
                 {
-                    NodeType::BinOp {
-                        a: Box::new(Node {
-                            data: NodeType::Integer(int),
-                            pos: pos.clone(),
-                        }),
-                        op: "*".into(),
-                        b: Box::new(self.parse_atom(false).unwrap()),
-                    }
+                    NodeType::Group(Box::new(Node {
+                        data: NodeType::BinOp {
+                            a: Box::new(Node {
+                                data: NodeType::Integer(int),
+                                pos: pos.clone(),
+                            }),
+                            op: "*".into(),
+                            b: Box::new(self.parse_atom(false).unwrap()),
+                        },
+                        pos: pos.start..self.pos_end(),
+                    }))
                 } else {
                     NodeType::Integer(int)
                 }
@@ -297,12 +300,10 @@ impl Parser {
                             None
                         } else {
                             Some(Node {
-                                data: {
-                                    if list.len() > 1 || matches!(list[0].data, NodeType::List(_)) {
-                                        NodeType::List(list)
-                                    } else {
-                                        list.remove(0).data
-                                    }
+                                data: if list.len() > 1 || matches!(list[0].data, NodeType::List(_)) {
+                                    NodeType::List(list)
+                                } else {
+                                    list.remove(0).data
                                 },
                                 pos: start..self.pos_end(),
                             })
@@ -337,14 +338,13 @@ impl Parser {
                         mode,
                         target: {
                             let val = self.parse_value(false).unwrap();
-
                             if !matches!(val.data, NodeType::Variable(_) ) {
                                 self.error("Syntax error")
-                                    .label(pos, format!("Can only {verb} variables"))
+                                    .label(pos, format!("Found {verb} operator here"))
                                     .label(val.pos, format!("Expected variable, found {}", val.data))
-                                    .eprint();
+                                    .note(format!("Only variables can be {verb}ed"))
+                                    .eprint()
                             }
-
                             Box::new(val)
                         }
                     }
@@ -354,9 +354,9 @@ impl Parser {
 
                 "&" | "~" => NodeType::Variable(sym.into()),
 
-                op if BEFORE_OPERATORS.contains(&op) => NodeType::BefOp {
+                op if util::is_op(Before, op) => NodeType::BefOp {
                     op: op.into(),
-                    target: Box::new(self.parse_value(false).unwrap()),
+                    target: Box::new(self.parse_operation(util::op_prec(Before, op), false).unwrap()),
                 },
 
                 _ => optional_expected!()
@@ -372,7 +372,7 @@ impl Parser {
     }
 
     fn parse_expression(&mut self, optional: bool) -> Option<Node> {
-        let mut expr = self.parse_value(optional)?;
+        let mut expr = self.parse_operation(1, optional)?;
         let expr_start = expr.pos.start;
 
         if let Token { value: TokenType::Symbol(ref sym), .. } = self.next() {
@@ -386,20 +386,16 @@ impl Parser {
                 "!" if !self.stop.contains(&"!") => self.parse_if(expr, true),
 
                 "=" if !self.stop.contains(&"=") => NodeType::Assign {
-                    target: Box::new(self.check_vars(expr, false, "assignment", "target variable(s)")),
+                    target: Box::new(self.check_vars(expr, true, "assignment", "target variable(s)")),
                     op: String::new(),
                     value: Box::new(self.parse_expression(false).unwrap()),
                 },
 
-                op if BINARY_OPERATORS.contains(&&op[..op.len() - 1]) && op.ends_with('=') => NodeType::Assign {
-                    target: Box::new(self.check_vars(expr, true, "assignment", "target variable")),
+                op if util::is_bin_op(&op[..op.len() - 1]) && op.ends_with('=') => NodeType::Assign {
+                    target: Box::new(self.check_vars(expr, false, "augmented assignment", "target variable")),
                     op: String::new(),
                     value: Box::new(self.parse_expression(false).unwrap()),
                 },
-
-                op if BINARY_OPERATORS.contains(&op) => todo!("bin op"),
-
-                op if COMPARE_OPERATORS.contains(&op) => todo!("cmp"),
 
                 _ => { self.prev(); return Some(expr) }
             };
@@ -460,7 +456,7 @@ impl Parser {
                     () => {
                         let var = self.parse_atom(false).unwrap();
                         if !matches!(var.data, NodeType::Variable(_)) {
-                            self.expected(var.pos, "variable", var.data);
+                            self.expected(var.pos, "variable", var.data).eprint();
                         }
                         vars.push(var);
                     }
@@ -478,7 +474,7 @@ impl Parser {
                         } else if next.value.is(",") {
                             parse_ident!();
                         } else {
-                            self.expected(next.pos, "mode specifier, comma, or block", next.value);
+                            self.expected(next.pos, "mode specifier, comma, or block", next.value).eprint();
                         }
                     } else {
                         break
@@ -582,6 +578,69 @@ impl Parser {
         NodeType::List(list)
     }
 
+    fn parse_operation(&mut self, prec: usize, optional: bool) -> Option<Node> {
+        let mut next_prec = MAX_PREC.min(prec + 1);
+        while next_prec != MAX_PREC && !matches!(util::prec_type(next_prec), LeftAssoc | RightAssoc | Compare) {
+            next_prec += 1;
+        }
+
+        macro_rules! parse_operand {
+            () => {
+                if prec == util::MAX_PREC {
+                    self.parse_value(optional)?
+                } else {
+                    self.parse_operation(next_prec, optional)?
+                }
+            }
+        }
+
+        let mut a = parse_operand!();
+        let op_type = util::prec_type(prec);
+
+        if op_type == Compare {
+            let mut chain = Vec::new();
+
+            while let TokenType::Symbol(op) = self.next().value {
+                if util::op_prec(op_type, &op) != prec { break }
+                chain.push((op, Box::new(parse_operand!())));
+            }
+
+            if !chain.is_empty() {
+                a = Node {
+                    pos: a.pos.start..self.pos_end(),
+                    data: NodeType::Compare {
+                        first: Box::new(a),
+                        chain
+                    },
+                };
+            }
+        }
+
+        else {
+            while let TokenType::Symbol(op) = self.next().value {
+                if util::op_prec(op_type, &op) != prec { break }
+                
+                let b = if op_type == RightAssoc {
+                    self.parse_operation(prec, optional)?
+                } else {
+                    parse_operand!()
+                };
+
+                a = Node {
+                    pos: a.pos.start..self.pos_end(),
+                    data: NodeType::BinOp {
+                        a: Box::new(a),
+                        op,
+                        b: Box::new(b),
+                    },
+                };
+            }
+        }
+
+        self.prev();
+        Some(a)
+    }
+
     fn parse_statement(&mut self, optional: bool) -> Option<Node> {
         let Token { value, pos, .. } = self.next();
 
@@ -621,7 +680,7 @@ impl Parser {
                 if optional {
                     None
                 } else {
-                    self.expected(pos, "statement", value);
+                    self.expected(pos, "statement", value).eprint();
                 }
             },
 
@@ -707,7 +766,103 @@ impl Parser {
                         },
                     },
 
-                    "[" => todo!("index or weird bracket shit"),
+                    "[" => {
+                        let next = self.next();
+
+                        let iter_mode = IterMode::from_token(&next);
+                        if let IterMode::Default = iter_mode {
+                            let index_mode = IndexMode::from_token(&next);
+                            if let IndexMode::Default = index_mode {
+                                self.prev();
+
+                                let mut values = [None, None, None];
+                                let mut value_pos = 0;
+                                let mut is_slice = false;
+                                let mut can_add_expr = true;
+
+                                loop {
+                                    let token = self.next();
+
+                                    if token.value.is("]") {
+                                        break if is_slice {
+                                            NodeType::Slice {
+                                                target: Box::new(parsed_value),
+                                                start: Box::new(values[0].take()),
+                                                stop: Box::new(values[1].take()),
+                                                step: Box::new(values[2].take()),
+                                            }
+                                        } else {
+                                            NodeType::Index {
+                                                target: Box::new(parsed_value),
+                                                mode: IndexMode::Default,
+                                                index: Box::new(values[0].take().unwrap_or_else(
+                                                    || self.expected(token.pos, "value", token.value).eprint()
+                                                )),
+                                            }
+                                        }
+                                    }
+
+                                    else if token.value.is(",") {
+                                        is_slice = true;
+                                        value_pos += 1;
+                                    }
+
+                                    else if can_add_expr {
+                                        self.prev();
+                                        values[value_pos] = self.reset_stops(|s| {
+                                            s.ignoring_nl(|s| {
+                                                s.with_stop(",", |s| {
+                                                    s.parse_expression(true)
+                                                })
+                                            })
+                                        });
+                                    }
+
+                                    else {
+                                        self.prev();
+                                        self.expected_bracket(pos.clone(), "]", true);
+                                    }
+
+                                    if value_pos > 2 {
+                                        self.expected(token.pos, "]", token.value)
+                                            .note("A maximum of 3 values may be specified in a slice (start, stop, step)")
+                                            .eprint();
+                                    }
+
+                                    can_add_expr = token.value.is(",");
+                                }
+                            } else {
+                                NodeType::Index {
+                                    target: Box::new(parsed_value),
+                                    mode: index_mode,
+                                    index: Box::new(self.reset_stops(|s| {
+                                        s.ignoring_nl(|s| {
+                                            let expr = s.parse_expression(false).unwrap();
+                                            s.expected_bracket(pos.clone(), "]", true);
+                                            expr
+                                        })
+                                    })),
+                                }
+                            }
+                        } else {
+                            let f = FnDef {
+                                args: vec![Node {
+                                    data: NodeType::Variable("~".into()),
+                                    pos: self.eof.pos.clone(),
+                                }],
+                                block: self.reset_stops(|s| s.parse_statement(false).unwrap()),
+                            };
+
+                            self.expected_bracket(pos.clone(), "]", true);
+
+                            self.functions.push(f);
+                            NodeType::BracketThing {
+                                target: Box::new(parsed_value),
+                                mode: iter_mode,
+                                fn_index: self.functions.len() - 1,
+                            }
+                        }
+                    },
 
                     "{" => NodeType::BraceThing {
                         target: Box::new(parsed_value),
@@ -716,7 +871,7 @@ impl Parser {
                             let mode = IterMode::from_token(&next);
 
                             if let IterMode::Default = mode {
-                                self.expected(next.pos, "mode specifier", next.value)
+                                self.expected(next.pos, "mode specifier", next.value).eprint()
                             }
 
                             mode
@@ -743,17 +898,17 @@ impl Parser {
                             target: {
                                 if !matches!(parsed_value.data, NodeType::Variable(_) ) {
                                     self.error("Syntax error")
-                                        .label(pos, format!("Can only {verb} variables"))
+                                        .label(pos, format!("Found {verb} operator here"))
                                         .label(parsed_value.pos, format!("Expected variable, found {}", parsed_value.data))
-                                        .eprint();
+                                        .note(format!("Only variables can be {verb}ed"))
+                                        .eprint()
                                 }
-
                                 Box::new(parsed_value)
                             }
                         }
                     },
 
-                    op if AFTER_OPERATORS.contains(&op) => NodeType::AftOp {
+                    op if util::is_op(After, op) => NodeType::AftOp {
                         op: op.into(),
                         target: Box::new(parsed_value),
                     },

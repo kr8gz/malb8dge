@@ -2,7 +2,7 @@ use ariadne::*;
 
 use std::{fs, process};
 
-use crate::constants::Pos;
+use crate::util::Pos;
 
 struct ColorGenerator {
     hue: f64,
@@ -125,7 +125,7 @@ impl Error {
         report
             .finish()
             .eprint((&self.file, Source::from(
-                fs::read_to_string(&self.file).unwrap().replace('\r', "")
+                fs::read_to_string(&self.file).unwrap().replace("\r\n", "\n")
             )))
             .unwrap();
 

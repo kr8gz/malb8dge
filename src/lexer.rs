@@ -2,7 +2,7 @@ use std::{fs, process, fmt::Display};
 
 use ariadne::{Fmt, Color};
 
-use crate::{constants::{self, *}, errors::*};
+use crate::{util::{self, *}, errors::*};
 
 /// Example:
 /// ```
@@ -132,7 +132,7 @@ impl Lexer {
     pub fn from_str(file: String, code: String, offset: usize) -> Self {
         let mut lexer = Self {
             file,
-            chars: code.chars().filter(|&c| c != '\r').collect(),
+            chars: code.replace("\r\n", "\n").chars().collect(),
 
             char_index: 0,
             token_start: 0,
@@ -368,7 +368,7 @@ impl Lexer {
                 brace_depth -= 1;
 
                 if brace_depth == 0 {
-                    fragments.push(self.lex_fragment(push_target, frag_start));
+                    fragments.push(self.lex_expr_frag(push_target, frag_start));
                     push_target = String::new();
                 } else {
                     push_target.push('}');
@@ -442,7 +442,7 @@ impl Lexer {
                 brace_depth -= 1;
                 
                 if brace_depth == 0 {
-                    fragments.push(self.lex_fragment(frag, frag_start));
+                    fragments.push(self.lex_expr_frag(frag, frag_start));
                     frag = String::new();
                 } else {
                     frag.push('}');
@@ -515,9 +515,9 @@ impl Lexer {
             if next != ' ' && (
                 // continue the symbol if it's either...
                 // - `symbol + next` creates one of the combined symbols
-                constants::ALL_SYMBOLS.contains(&format!("{symbol}{next}").as_str())
+                util::is_sym(&format!("{symbol}{next}"))
                 // - or `symbol` is a binary operator and `next` is '=' (augmented assignment)
-                || constants::BINARY_OPERATORS.contains(&symbol.as_str()) && next == '='
+                || util::is_bin_op(&symbol) && next == '='
             ) {
                 symbol.push(next);
             }
@@ -540,7 +540,7 @@ impl Lexer {
         self.push(TokenType::Symbol(symbol));
     }
 
-    fn lex_fragment(&self, expr: String, offset: usize) -> LexedFragment {
+    fn lex_expr_frag(&self, expr: String, offset: usize) -> LexedFragment {
         LexedFragment::Expr(Lexer::from_str(self.file.clone(), expr, offset))
     }
 }

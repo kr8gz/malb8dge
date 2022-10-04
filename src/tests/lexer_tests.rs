@@ -100,16 +100,16 @@ mod tests {
     token_test! {
         many_symbols
 
-        "+++==@@@ @@@```"
+        "+++==$$$ $$$```"
 
         TokenType::Symbol("++".into()),     0..2
         TokenType::Symbol("+=".into()),     2..4
         TokenType::Symbol("=".into()),      4..5
-        TokenType::Symbol("@@".into()),     5..7
-        TokenType::Symbol("@".into()),      7..8
+        TokenType::Symbol("$$".into()),     5..7
+        TokenType::Symbol("$".into()),      7..8
 
-        TokenType::Symbol("@@".into()),     9..11
-        TokenType::Symbol("@".into()),      11..12
+        TokenType::Symbol("$$".into()),     9..11
+        TokenType::Symbol("$".into()),      11..12
         TokenType::Symbol("``".into()),     12..14
         TokenType::Symbol("`".into()),      14..15
     }

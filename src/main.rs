@@ -3,7 +3,7 @@ use std::{env, process};
 use ariadne::{Fmt, Color};
 
 mod ast;
-mod constants;
+mod util;
 mod errors;
 
 mod lexer;

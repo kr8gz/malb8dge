@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::{lexer::*, constants::*};
+use crate::{lexer::*, util::*};
 
 type BNode = Box<Node>;
 type ONode = Box<Option<Node>>;
@@ -29,10 +29,11 @@ pub enum NodeType {
     BefOp { target: BNode, op: String },
     BinOp { a: BNode, op: String, b: BNode },
     AftOp { target: BNode, op: String },
-    FnCall { target: BNode, args: VNode },  
+    Compare { first: BNode, chain: Vec<(String, BNode)> },
+    FnCall { target: BNode, args: VNode },
     Index { target: BNode, mode: IndexMode, index: BNode },
     Slice { target: BNode, start: ONode, stop: ONode, step: ONode },
-    BracketThing { target: BNode, mode: IterMode, value: BNode },
+    BracketThing { target: BNode, mode: IterMode, fn_index: usize },
     BraceThing { target: BNode, mode: IterMode },
     Replace { target: BNode, mode: ReplaceMode, pairs: ZipLonger<Vec<ParsedFragment>> },
     CharReplace { target: BNode, mode: ReplaceMode, pairs: ZipLonger<char> },
@@ -64,6 +65,7 @@ impl Display for NodeType {
             Self::Loop { .. } => "loop".into(),
             Self::Function { .. } => "function definition".into(),
             Self::BefOp { .. } | Self::BinOp { .. } | Self::AftOp { .. } => "expression".into(),
+            Self::Compare { .. } => "comparison".into(),
             Self::FnCall { .. } => "function call".into(),
             Self::Index { .. } => "index".into(),
             Self::BracketThing { .. } => "bracket thing".into(),
