@@ -1,94 +1,14 @@
-use std::{fs, process, fmt::Display};
+use std::{fs, process};
 
 use ariadne::{Fmt, Color};
 
-use crate::{util::{self, *}, errors::*};
+use crate::{util, errors::*};
 
-/// Example:
-/// ```
-/// fmt_plural!("Found {} value{}", 1) // Found 1 value
-/// fmt_plural!("Found {} value{}", 5) // Found 5 values
-/// ```
+use super::tokens::*;
+
 macro_rules! fmt_plural {
     ( $s:literal, $n:expr ) => {
         format!($s, $n, if $n == 1 { "" } else { "s" })
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Token {
-    pub value: TokenType,
-    pub macro_data: Option<MacroData>,
-    pub pos: Pos,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum TokenType {
-    Identifier(String),
-    Replace(ReplaceData<Vec<LexedFragment>>),
-    CharReplace(ReplaceData<char>),
-    String(Vec<LexedFragment>),
-    Integer(u32),
-    Float(f64),
-    Symbol(String),
-    Eof,
-}
-
-impl TokenType {
-    pub fn is(&self, sym: &str) -> bool {
-        matches!(self, TokenType::Symbol(ref s) if s == sym)
-    }
-
-    pub fn eof(&self) -> bool {
-        matches!(self, TokenType::Eof)
-    }
-}
-
-impl Display for TokenType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", match self {
-            Self::Identifier(_) => "identifier".into(),
-            Self::Replace(_) | Self::CharReplace(_) => "replace expression".into(),
-            Self::String(_) => "string".into(),
-            Self::Integer(_) => "integer".into(),
-            Self::Float(_) => "float".into(),
-            Self::Symbol(sym) => match sym.as_str() {
-                "\n" => "newline".into(),
-                _ => format!("'{sym}'")
-            },
-            Self::Eof => "end of file".into(),
-        })
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct MacroData {
-
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ReplaceData<T> {
-    pub left: Vec<T>,
-    pub right: Vec<T>,
-    pub mode: ReplaceMode,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum ReplaceMode {
-    Normal,
-    Swap,
-    First,
-    Last,
-}
-
-impl ReplaceMode {
-    fn from_char(c: char) -> Self {
-        match c {
-            '|' => Self::Swap,
-            '!' => Self::First,
-            '@' => Self::Last,
-            _ => Self::Normal,
-        }
     }
 }
 
@@ -96,12 +16,6 @@ impl ReplaceMode {
 enum ReplaceLexStep {
     LeftPattern,
     RightPattern,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum LexedFragment {
-    Expr(Lexer),
-    Literal(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -170,21 +84,13 @@ impl Lexer {
 
             if next.is_alphabetic() {
                 self.lex_identifier(next);
-            }
-
-            else if next == '\\' {
+            } else if next == '\\' {
                 self.lex_replace();
-            }
-
-            else if next == '"' {
+            } else if next == '"' {
                 self.lex_string();
-            }
-
-            else if next.is_ascii_digit() {
+            } else if next.is_ascii_digit() {
                 self.lex_number(next);
-            }
-
-            else if !" \t".contains(next) {
+            } else if !" \t".contains(next) {
                 self.lex_symbol(next);
             }
         }
@@ -249,66 +155,7 @@ impl Lexer {
             }
 
             else if step == ReplaceLexStep::RightPattern && next == '\\' && brace_depth == 0 {
-                let is_swap = replace_mode == ReplaceMode::Swap;
-
-                let (len_l, len_r);
-                let token_value;
-
-                if char_mode {
-                    (len_l, len_r) = (left_char_pattern.len(), push_target.len());
-                    token_value = TokenType::CharReplace(ReplaceData {
-                        left: left_char_pattern.chars().collect(),
-                        right: push_target.chars().collect(),
-                        mode: replace_mode,
-                    });
-                }
-
-                else {
-                    if !push_target.is_empty() {
-                        fragments.push(LexedFragment::Literal(push_target));
-                    }
-                    if !fragments.is_empty() {
-                        pattern.push(fragments);
-                    }
-
-                    (len_l, len_r) = (left_pattern.len(), pattern.len());
-                    token_value = TokenType::Replace(ReplaceData {
-                        left: left_pattern,
-                        right: pattern,
-                        mode: replace_mode,
-                    });
-                }
-
-                if is_swap && len_l != len_r {
-                    self.error("Different number of swap pattern values")
-                        .label(
-                            left_start..right_start - 1, 
-                            fmt_plural!("Left side has {} value{}", len_l)
-                        )
-                        .label(
-                            right_start..self.actual_pos - 1,
-                            fmt_plural!("Right side has {} value{}", len_r)
-                        )
-                        .help("Add or remove some values to balance both sides")
-                        .eprint();
-                }
-                
-                else if len_l < len_r {
-                    self.error("More replace values than find values")
-                        .label(
-                            left_start..right_start - 1,
-                            fmt_plural!("Found {} find value{}", len_l)
-                        )
-                        .label(
-                            right_start..self.actual_pos - 1,
-                            fmt_plural!("Found {} replace value{}", len_r)
-                        )
-                        .help("Add more find values or remove some replace values")
-                        .eprint();
-                }
-
-                self.push(token_value);
-                return
+                break
             }
 
             else if !char_mode && next == ',' && brace_depth == 0 {
@@ -380,18 +227,86 @@ impl Lexer {
             }
         }
 
-        self.prev();
+        if step == ReplaceLexStep::LeftPattern {
+            self.prev();
 
-        let mut err = self
-            .error("Unclosed replace expression")
-            .label(self.token_start..self.actual_pos, "This replace expression hasn't been closed")
-            .label(self.actual_pos..self.actual_pos, "Expected another '\\' to finish it");
-
-        if self.tokens.iter().any(|t| matches!(t.value, TokenType::Replace(_) | TokenType::CharReplace(_))) {
-            err = err.note("Check if you forgot to close an earlier one");
+            let mut err = self
+                .error("Unfinished replace expression")
+                .label(self.token_start..self.actual_pos, "This replace expression doesn't have a replace mode specified")
+                .label(self.actual_pos..self.actual_pos, "Unexpected end of file");
+    
+            if self.tokens.iter().any(|t| matches!(t.value, TokenType::Replace(_) | TokenType::CharReplace(_))) {
+                err = err.note("Check if you forgot to close an earlier one");
+            } else {
+                err = err.help("Add a replace mode specifier and optionally a replace pattern");
+            }
+    
+            err.eprint();
         }
 
-        err.eprint();
+        let is_swap = replace_mode == ReplaceMode::Swap;
+
+        let (len_l, len_r);
+        let token_value;
+
+        if char_mode {
+            (len_l, len_r) = (left_char_pattern.len(), push_target.len());
+            token_value = TokenType::CharReplace(ReplaceData {
+                left: left_char_pattern.chars().collect(),
+                right: push_target.chars().collect(),
+                mode: replace_mode,
+            });
+        }
+
+        else {
+            if !push_target.is_empty() {
+                fragments.push(if brace_depth > 0 {
+                    self.lex_expr_frag(push_target, frag_start)
+                } else {
+                    LexedFragment::Literal(push_target)
+                });
+            }
+            if !fragments.is_empty() {
+                pattern.push(fragments);
+            }
+
+            (len_l, len_r) = (left_pattern.len(), pattern.len());
+            token_value = TokenType::Replace(ReplaceData {
+                left: left_pattern,
+                right: pattern,
+                mode: replace_mode,
+            });
+        }
+
+        if is_swap && len_l != len_r {
+            self.error("Different number of swap pattern values")
+                .label(
+                    left_start..right_start - 1, 
+                    fmt_plural!("Left side has {} value{}", len_l)
+                )
+                .label(
+                    right_start..self.actual_pos - 1,
+                    fmt_plural!("Right side has {} value{}", len_r)
+                )
+                .help("Add or remove some values to balance both sides")
+                .eprint();
+        }
+        
+        else if len_l < len_r {
+            self.error("More replace values than find values")
+                .label(
+                    left_start..right_start - 1,
+                    fmt_plural!("Found {} find value{}", len_l)
+                )
+                .label(
+                    right_start..self.actual_pos - 1,
+                    fmt_plural!("Found {} replace value{}", len_r)
+                )
+                .help("Add more find values or remove some replace values")
+                .eprint();
+        }
+
+        self.push(token_value);
     }
     
     fn lex_string(&mut self) {
@@ -421,9 +336,7 @@ impl Lexer {
 
             // end string
             else if next == '"' && brace_depth == 0 {
-                fragments.push(LexedFragment::Literal(frag));
-                self.push(TokenType::String(fragments));
-                return
+                break
             }
 
             else if next == '{' && !is_escape {
@@ -454,18 +367,12 @@ impl Lexer {
             }
         }
 
-        self.prev();
-
-        let mut err = self
-            .error("Unclosed string")
-            .label(self.token_start..self.actual_pos, "This string hasn't been closed")
-            .label(self.actual_pos..self.actual_pos, "Expected another '\"' to finish it");
-
-        if self.tokens.iter().any(|t| matches!(t.value, TokenType::String(_))) {
-            err = err.note("Check if you forgot to close an earlier string");
-        }
-
-        err.eprint();
+        fragments.push(if brace_depth > 0 {
+            self.lex_expr_frag(frag, frag_start)
+        } else {
+            LexedFragment::Literal(frag)
+        });
+        self.push(TokenType::String(fragments));
    }
     
     fn lex_number(&mut self, first: char) {

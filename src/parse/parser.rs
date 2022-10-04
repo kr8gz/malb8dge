@@ -1,6 +1,6 @@
 use std::{iter, fmt};
 
-use crate::{ast::*, util, util::{*, OpType::*}, lexer::*, errors::Error};
+use crate::{parse::ast::*, util::{self, *, OpType::*}, lex::{lexer::*, tokens::*}, errors::*};
 
 #[derive(Debug)]
 pub struct Parser {
@@ -573,7 +573,7 @@ impl Parser {
 
     fn parse_operation(&mut self, prec: usize, optional: bool) -> Option<Node> {
         let mut next_prec = util::MAX_PREC.min(prec + 1);
-        while next_prec != MAX_PREC && !is_bin_type(util::prec_type(next_prec)) {
+        while next_prec != util::MAX_PREC && !util::is_bin_type(util::prec_type(next_prec)) {
             next_prec += 1;
         }
 
@@ -610,7 +610,7 @@ impl Parser {
             self.prev();
         }
 
-        else if is_bin_type(op_type) {
+        else if util::is_bin_type(op_type) {
             while let TokenType::Symbol(op) = self.next().value {
                 if util::op_prec(op_type, &op) != prec { break }
                 
@@ -872,7 +872,7 @@ impl Parser {
                         }
                     },
 
-                    "{" => NodeType::BraceThing {
+                    "{" => NodeType::BraceIter {
                         target: Box::new(parsed_value),
                         mode: {
                             let next = self.next();

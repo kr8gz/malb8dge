@@ -2,15 +2,13 @@ use std::{env, process};
 
 use ariadne::{Color, Fmt};
 
-mod ast;
 mod util;
 mod errors;
 
-mod lexer;
-mod parser;
-mod compiler;
-
-mod tests;
+mod lex;
+mod parse;
+mod compile;
+mod run;
 
 fn main() {
     let mut args = env::args();
@@ -21,9 +19,11 @@ fn main() {
         process::exit(1)
     });
     
-    let lexer = lexer::Lexer::from_file(file);
+    let lexer = lex::lexer::Lexer::from_file(file);
     
-    let parser = parser::Parser::new(lexer);
+    let parser = parse::parser::Parser::new(lexer);
 
-    println!("{:#?}", &parser);
+    let compiler = compile::compiler::Compiler::new(parser);
+
+    println!("{:#?}", &compiler);
 }

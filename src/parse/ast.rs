@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::{lexer::*, util::*};
+use crate::{lex::tokens::*, util::*};
 
 type BNode = Box<Node>;
 type ONode = Box<Option<Node>>;
@@ -35,7 +35,7 @@ pub enum NodeType {
     Slice { target: BNode, start: ONode, stop: ONode, step: ONode },
     BracketIndex { target: BNode, mode: IndexMode, value: BNode }, // index of, count, contains, ...
     BracketIter { target: BNode, mode: IterMode, expr: BNode }, // sum, filter, print, ...
-    BraceThing { target: BNode, mode: IterMode },
+    BraceIter { target: BNode, mode: IterMode },
     Replace { target: BNode, mode: ReplaceMode, pairs: ZipLonger<Vec<ParsedFragment>> },
     CharReplace { target: BNode, mode: ReplaceMode, pairs: ZipLonger<char> },
     Print { value: ONode, mode: PrintMode },
@@ -72,7 +72,7 @@ impl Display for NodeType {
             Self::BracketIndex { .. } => "bracket indexing thing".into(),
             Self::BracketIter { .. } => "bracket iterating thing".into(),
             Self::Slice { .. } => "slice".into(),
-            Self::BraceThing { .. } => "brace thing".into(),
+            Self::BraceIter { .. } => "brace iterating thing".into(),
             Self::Replace { .. } | Self::CharReplace { .. } => "replace expression".into(),
             Self::Print { .. } => "print".into(),
             Self::Input { .. } => "input".into(),
@@ -100,7 +100,7 @@ macro_rules! enum_modes {
         $name:ident
         $( $var:ident: $sym:literal, )*
     ) => {
-        #[derive(Debug)]
+        #[derive(Debug, PartialEq)]
         pub enum $name {
             $( $var, )*
             Default
@@ -176,7 +176,7 @@ pub enum IncrementMode {
   
 macro_rules! keywords {
     ( $($n:ident),* ) => {
-        #[derive(Debug)]
+        #[derive(Debug, PartialEq)]
         pub enum Keyword {
             $( $n, )*
         }
