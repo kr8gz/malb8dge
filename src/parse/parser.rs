@@ -1,6 +1,8 @@
 use std::{iter, fmt};
 
-use crate::{parse::ast::*, util::{self, *, OpType::*}, lex::{lexer::*, tokens::*}, errors::*};
+use ariadne::ReportKind;
+
+use crate::{parse::ast::*, operators::{self, *, OpType::*}, lex::{lexer::*, tokens::*}, errors::*};
 
 #[derive(Debug)]
 pub struct Parser {
@@ -51,7 +53,7 @@ impl Parser {
 
     // ------------------------------- error helper methods -------------------------------
     fn error(&self, msg: &str) -> Error {
-        Error::new(self.file.clone(), msg)
+        Error::new(self.file.clone(), msg, ReportKind::Error)
     }
 
     fn expected<T: fmt::Display>(&self, pos: Pos, expected: &str, found: T) -> Error {
@@ -102,7 +104,7 @@ impl Parser {
             let node = self.check_vars(node, true, found, expected);
             match node.data {
                 NodeType::List(mut list) => vars.append(&mut list),
-                NodeType::Variable(_) => vars.push(node),
+                NodeType::Variable(_) | NodeType::Index { .. } => vars.push(node),
                 _ => unreachable!()
             }
         }
@@ -226,7 +228,7 @@ impl Parser {
                                 data: NodeType::Integer(int),
                                 pos: pos.clone(),
                             }),
-                            op: "*".into(),
+                            op: op_id(Binary, "*"),
                             b: Box::new(self.parse_atom(false).unwrap()),
                         },
                         pos: pos.start..self.pos_end(),
@@ -325,15 +327,15 @@ impl Parser {
                     },
                 },
 
-                "++" | "--" => {
-                    let (mode, verb) = match sym.as_str() {
-                        "++" => (IncrementMode::Add, "increment"),
-                        "--" => (IncrementMode::Sub, "decrement"),
+                op @ ("++" | "--") => {
+                    let verb = match sym.as_str() {
+                        "++" => "increment",
+                        "--" => "decrement",
                         _ => unreachable!()
                     };
 
-                    NodeType::IncrementBef {
-                        mode,
+                    NodeType::UnaryOp {
+                        op: operators::op_id(Before, op),
                         target: {
                             let val = self.parse_value(false).unwrap();
                             if !matches!(val.data, NodeType::Variable(_) | NodeType::Index { .. } ) {
@@ -352,9 +354,9 @@ impl Parser {
 
                 "&" | "~" => NodeType::Variable(sym.into()),
 
-                op if util::is_op(Before, op) => NodeType::BefOp {
-                    op: op.into(),
-                    target: Box::new(self.parse_operation(util::op_prec(Before, op), false).unwrap()),
+                op if operators::is_op(Before, op) => NodeType::UnaryOp {
+                    op: operators::op_id(Before, op),
+                    target: Box::new(self.parse_operation(operators::op_prec(Before, op), false).unwrap()),
                 },
 
                 _ => optional_expected!()
@@ -383,15 +385,26 @@ impl Parser {
 
                 "!" if !self.stop.contains(&"!") => self.parse_if(expr, true),
 
-                "=" if !self.stop.contains(&"=") => NodeType::Assign {
-                    target: Box::new(self.check_vars(expr, true, "assignment", "target variable(s)")),
-                    op: String::new(),
-                    value: Box::new(self.parse_expression(false).unwrap()),
+                "=" if !self.stop.contains(&"=") => {
+                    let target = self.check_vars(expr, true, "assignment", "target variable(s)");
+
+                    if let NodeType::List(targets) = target.data {
+                        NodeType::MultipleAssign {
+                            targets,
+                            value: Box::new(self.parse_expression(false).unwrap()),
+                        }
+                    } else {
+                        NodeType::Assign {
+                            target: Box::new(target),
+                            op: String::new(),
+                            value: Box::new(self.parse_expression(false).unwrap()),
+                        }
+                    }
                 },
 
-                op if util::is_bin_op(&op[..op.len() - 1]) && op.ends_with('=') => NodeType::Assign {
+                op if operators::is_op(Binary, &op[..op.len() - 1]) && op.ends_with('=') => NodeType::Assign {
                     target: Box::new(self.check_vars(expr, false, "augmented assignment", "target variable")),
-                    op: String::new(),
+                    op: op[..op.len() - 1].into(),
                     value: Box::new(self.parse_expression(false).unwrap()),
                 },
 
@@ -572,14 +585,14 @@ impl Parser {
     }
 
     fn parse_operation(&mut self, prec: usize, optional: bool) -> Option<Node> {
-        let mut next_prec = util::MAX_PREC.min(prec + 1);
-        while next_prec != util::MAX_PREC && !util::is_bin_type(util::prec_type(next_prec)) {
+        let mut next_prec = operators::MAX_PREC.min(prec + 1);
+        while next_prec != operators::MAX_PREC && !operators::is_bin_type(next_prec) {
             next_prec += 1;
         }
 
         macro_rules! parse_operand {
             () => {
-                if prec == util::MAX_PREC {
+                if prec == operators::MAX_PREC {
                     self.parse_value(optional)?
                 } else {
                     self.parse_operation(next_prec, optional)?
@@ -588,13 +601,14 @@ impl Parser {
         }
 
         let mut a = parse_operand!();
-        let op_type = util::prec_type(prec);
+        let prec_type = operators::prec_type(prec);
+        let op_type = operators::op_type(prec_type);
 
-        if op_type == Compare {
+        if prec_type == PrecType::Compare {
             let mut chain = Vec::new();
 
             while let TokenType::Symbol(op) = self.next().value {
-                if util::op_prec(op_type, &op) != prec { break }
+                if operators::op_prec(op_type, &op) != prec { break }
                 chain.push((op, Box::new(parse_operand!())));
             }
 
@@ -608,13 +622,11 @@ impl Parser {
                 };
             }
             self.prev();
-        }
-
-        else if util::is_bin_type(op_type) {
+        } else if op_type == Binary {
             while let TokenType::Symbol(op) = self.next().value {
-                if util::op_prec(op_type, &op) != prec { break }
+                if operators::op_prec(op_type, &op) != prec { break }
                 
-                let b = if op_type == RightAssoc {
+                let b = if prec_type == PrecType::RightAssoc {
                     self.parse_operation(prec, optional)?
                 } else {
                     parse_operand!()
@@ -624,7 +636,7 @@ impl Parser {
                     pos: a.pos.start..self.pos_end(),
                     data: NodeType::BinOp {
                         a: Box::new(a),
-                        op,
+                        op: operators::op_id(op_type, &op),
                         b: Box::new(b),
                     },
                 };
@@ -893,15 +905,15 @@ impl Parser {
 
                     ":" if !self.stop.contains(&":") => self.parse_fn_def(vec![parsed_value]),
 
-                    "++" | "--" => {
-                        let (mode, verb) = match sym.as_str() {
-                            "++" => (IncrementMode::Add, "increment"),
-                            "--" => (IncrementMode::Sub, "decrement"),
+                    op @ ("++" | "--") => {
+                        let verb = match sym.as_str() {
+                            "++" => "increment",
+                            "--" => "decrement",
                             _ => unreachable!()
                         };
 
-                        NodeType::IncrementAft {
-                            mode,
+                        NodeType::UnaryOp {
+                            op: operators::op_id(After, op),
                             target: {
                                 if !matches!(parsed_value.data, NodeType::Variable(_) | NodeType::Index { .. } ) {
                                     self.error("Syntax error")
@@ -915,8 +927,8 @@ impl Parser {
                         }
                     },
 
-                    op if util::is_op(After, op) => NodeType::AftOp {
-                        op: op.into(),
+                    op if operators::is_op(After, op) => NodeType::UnaryOp {
+                        op: operators::op_id(After, op),
                         target: Box::new(parsed_value),
                     },
 

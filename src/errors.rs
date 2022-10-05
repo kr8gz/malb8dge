@@ -2,7 +2,7 @@ use ariadne::*;
 
 use std::{fs, process};
 
-use crate::util::Pos;
+use crate::operators::Pos;
 
 struct ColorGenerator {
     hue: f64,
@@ -52,16 +52,20 @@ impl ColorGenerator {
 pub struct Error {
     file: String,
     msg: String,
+    kind: ReportKind,
+
     labels: Vec<(Pos, String)>,
     help: Option<String>,
     note: Option<String>,
 }
 
 impl Error {
-    pub fn new<T: Into<String>>(file: String, msg: T) -> Self {
+    pub fn new<T: Into<String>>(file: String, msg: T, kind: ReportKind) -> Self {
         Self {
             file,
             msg: msg.into(),
+            kind,
+
             labels: Vec::new(),
             help: None,
             note: None,
@@ -83,11 +87,11 @@ impl Error {
         self
     }
 
-    pub fn eprint(self) -> ! {
+    pub fn print(self) {
         let mut colgen = ColorGenerator::new(self.labels.len());
 
         let mut report = Report::build(
-            ReportKind::Error,
+            self.kind,
             &self.file,
             self.labels.iter().map(|(pos, _)| pos.start).min().unwrap_or(0)
         )
@@ -96,10 +100,14 @@ impl Error {
 
         if self.labels.len() == 1 {
             for (pos, msg) in self.labels {
+                let color = match self.kind {
+                    ReportKind::Warning => Color::Yellow,
+                    _ => Color::RGB(255, 127, 127)
+                };
                 report = report.with_label(
                     Label::new((&self.file, pos))
                         .with_message(msg)
-                        .with_color(colgen.next())
+                        .with_color(color)
                 );
             }
         } else {
@@ -128,7 +136,10 @@ impl Error {
                 fs::read_to_string(&self.file).unwrap().replace("\r\n", "\n")
             )))
             .unwrap();
+    }
 
+    pub fn eprint(self) -> ! {
+        self.print();
         process::exit(1);
     }
 }

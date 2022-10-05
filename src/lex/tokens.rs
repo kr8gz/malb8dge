@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::util::Pos;
+use crate::operators::Pos;
 
 use super::lexer::*;
 

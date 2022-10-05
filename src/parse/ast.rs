@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::{lex::tokens::*, util::*};
+use crate::{lex::tokens::*, operators::*};
 
 type BNode = Box<Node>;
 type ONode = Box<Option<Node>>;
@@ -26,9 +26,8 @@ pub enum NodeType {
     While { cond: BNode, mode: IterMode, block: BNode },            // x ~        [mode] ? ... // x ~          [mode] [ ... ] //
     Loop { mode: IterMode, block: BNode },                          //                   ? ... //            ? [mode] { ... } //
     Function { args: VNode, block: BNode },
-    BefOp { target: BNode, op: String },
-    BinOp { a: BNode, op: String, b: BNode },
-    AftOp { target: BNode, op: String },
+    UnaryOp { target: BNode, op: usize }, // op: usize = op id
+    BinOp { a: BNode, op: usize, b: BNode },
     Compare { first: BNode, chain: Vec<(String, BNode)> },
     FnCall { target: BNode, args: VNode },
     Index { target: BNode, index: BNode },
@@ -40,13 +39,11 @@ pub enum NodeType {
     CharReplace { target: BNode, mode: ReplaceMode, pairs: ZipLonger<char> },
     Print { value: ONode, mode: PrintMode },
     Input { prompt: ONode, mode: InputMode },
-    IncrementBef { target: BNode, mode: IncrementMode },
-    IncrementAft { target: BNode, mode: IncrementMode },
     Group(BNode), // might not be needed after dealing with precedence and stuff
     List(VNode),
     Variable(String),
-    Keyword(Keyword),
     String(Vec<ParsedFragment>),
+    Keyword(Keyword),
     Integer(u32),
     Float(f64),
 }
@@ -65,7 +62,7 @@ impl Display for NodeType {
             Self::While { .. } => "while loop".into(),
             Self::Loop { .. } => "loop".into(),
             Self::Function { .. } => "function definition".into(),
-            Self::BefOp { .. } | Self::BinOp { .. } | Self::AftOp { .. } => "expression".into(),
+            Self::UnaryOp { .. } | Self::BinOp { .. } => "expression".into(),
             Self::Compare { .. } => "comparison".into(),
             Self::FnCall { .. } => "function call".into(),
             Self::Index { .. } => "index".into(),
@@ -76,10 +73,6 @@ impl Display for NodeType {
             Self::Replace { .. } | Self::CharReplace { .. } => "replace expression".into(),
             Self::Print { .. } => "print".into(),
             Self::Input { .. } => "input".into(),
-            Self::IncrementBef { mode, .. } | Self::IncrementAft { mode, .. } => match mode {
-                IncrementMode::Add => "incrementation".into(),
-                IncrementMode::Sub => "decrementation".into(),
-            },
             Self::Group(_) => "group".into(),
             Self::List(_) => "list".into(),
             Self::Variable(var) => match var.as_str() {
@@ -154,24 +147,18 @@ enum_modes! {
     IndexOf: "@",
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum PrintMode {
-    Normal,
-    Spaces,
-    NoNewline,
+    Normal = 0,
+    Spaces = 1,
+    NoNewline = 2,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum InputMode {
     String,
     Number,
     NumberList,
-}
-
-#[derive(Debug)]
-pub enum IncrementMode {
-    Add,
-    Sub,
 }
   
 macro_rules! keywords {

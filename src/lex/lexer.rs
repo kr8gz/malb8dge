@@ -1,8 +1,8 @@
 use std::{fs, process};
 
-use ariadne::{Fmt, Color};
+use ariadne::{Fmt, Color, ReportKind};
 
-use crate::{util, errors::*};
+use crate::{operators::{self, OpType::*}, errors::*};
 
 use super::tokens::*;
 
@@ -62,7 +62,7 @@ impl Lexer {
     }
 
     fn error(&self, msg: &str) -> Error {
-        Error::new(self.file.clone(), msg)
+        Error::new(self.file.clone(), msg, ReportKind::Error)
     }
     
     fn next(&mut self) -> Option<char> {
@@ -432,9 +432,9 @@ impl Lexer {
             if next != ' ' && (
                 // continue the symbol if it's either...
                 // - `symbol + next` creates one of the combined symbols
-                util::is_sym(&format!("{symbol}{next}"))
+                operators::is_combined_sym(&format!("{symbol}{next}"))
                 // - or `symbol` is a binary operator and `next` is '=' (augmented assignment)
-                || util::is_bin_op(&symbol) && next == '='
+                || operators::is_op(Binary, &symbol) && next == '='
             ) {
                 symbol.push(next);
             }
