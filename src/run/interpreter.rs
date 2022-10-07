@@ -1,3 +1,5 @@
+#![allow(unstable_name_collisions)]
+
 use std::{io::{self, Write}, process};
 
 use ariadne::ReportKind;
@@ -51,6 +53,13 @@ impl Interpreter {
         }
     }
 
+    fn join_list(&self, list: &[usize], sep: &str) -> String {
+        list.iter()
+            .map(|&v| self.memory[v].to_string(&self.memory))
+            .intersperse(sep.into())
+            .collect::<String>()
+    }
+
     fn run_func(&mut self, func: usize) {
         let instructions = &self.functions[func].instructions;
         let mut instr_pos = 0;
@@ -59,8 +68,8 @@ impl Interpreter {
             let instr = &instructions[instr_pos];
 
             macro_rules! value {
-                ( $type:ident, $data:expr ) => {
-                    ValueType::$type($data).into_value(&instr.pos)
+                ( $type:ident $(, $data:expr)? ) => {
+                    ValueType::$type( $($data)? ).into_value(&instr.pos)
                 }
             }
 
@@ -90,7 +99,7 @@ impl Interpreter {
                 }
 
                 Instruction::StoreVar(id) => {
-                    self.vars[id] = Some(self.stack.pop().unwrap())
+                    self.vars[id] = Some(self.stack.pop().unwrap());
                 }
 
                 Instruction::StoreIndex => {
@@ -112,42 +121,58 @@ impl Interpreter {
                 }
 
                 Instruction::BinaryOp(op_id) => {
-                    use ValueType::*;
+                    let mut b_id = self.stack.pop().unwrap();
+                    let rhs = &self.memory[b_id];
 
-                    let rhs = pop_stored!();
-                    let lhs = pop_stored!();
+                    let mut a_id = self.stack.pop().unwrap();
+                    let lhs = &self.memory[a_id];
 
-                    macro_rules! operators {
+                    macro_rules! bin_ops {
                         (
                             $(
-                                ( $op_a:expr $(, $op_b:expr)? )
-
                                 $op:literal {
+                                    % one way
                                     $(
-                                        $n_a:ident: $t_a:ident $(, $n_b:ident: $t_b:ident)? -> $t_ret:ident = $expr:expr
+                                        $a1:pat, $b1:pat => $ret1:ident($($expr1:expr)?);
+                                    )+
+                                    % both ways
+                                    $(
+                                        $a2:pat, $b2:pat => $ret2:ident($($expr2:expr)?);
                                     )+
                                 }
                             )*
                         ) => {
+                            use ValueType::*;
+
                             let op = operators::id_sym(op_id);
                             match op {
                                 $(
-                                    $op => match ( &$op_a.data $(, &$op_b.data )? ) {
+                                    $op => match ( &lhs.data, &rhs.data ) {
                                         $(
-                                            ( $t_a($n_a) $(, $t_b($n_b))? ) => {
-                                                push_stored!(value!($t_ret, $expr));
+                                            ( $a1, $b1 ) => {
+                                                push_stored!(value!($ret1 $(, $expr1)?));
+                                            }
+                                        )+
+                                        $(
+                                            ( $a2, $b2 ) => {
+                                                push_stored!(value!($ret2 $(, $expr2)?));
+                                            }
+                                            
+                                            #[allow(unused_assignments)] // they can be used in the op implementations
+                                            ( $b2, $a2 ) => {
+                                                (a_id, b_id) = (b_id, a_id);
+                                                push_stored!(value!($ret2 $(, $expr2)?));
                                             }
                                         )+
                                         _ => {
-                                            // TODO unary/binary errors
                                             self.error("Type error")
-                                                .label($op_a.pos.clone(), format!("This has type '{}'", $op_a.type_name()))
-                                             $( .label($op_b.pos.clone(), format!("This has type '{}'", $op_b.type_name())) )?
+                                                .label(lhs.pos.clone(), format!("This has type '{}'", lhs.type_name()))
+                                                .label(rhs.pos.clone(), format!("This has type '{}'", rhs.type_name()))
                                                 .label(
                                                     instr.pos.clone(),
                                                     format!(
                                                         "Binary '{op}' is not implemented for types '{}' and '{}'",
-                                                        $op_a.type_name(), $( $op_b.type_name(), )?
+                                                        lhs.type_name(), rhs.type_name(),
                                                     )
                                                 )
                                                 .eprint();
@@ -159,15 +184,32 @@ impl Interpreter {
                         }
                     }
                     
-                    operators! {
-                        (lhs, rhs)
-
+                    bin_ops! {
                         "+" {
-                            a: Integer, b: Integer  -> Integer  = a + b
-                            a: Integer, b: Float    -> Float    = *a as f64 + b
-                            a: Float,   b: Float    -> Float    = a + b
-                            a: Float,   b: Integer  -> Float    = a + *b as f64
-                            // todo
+                            % one way
+                            List(a),    List(b)     =>  List(a.iter().chain(b.iter()).cloned().collect());
+                            String(a),  String(b)   =>  String(a.clone() + b);
+                            List(a),    String(_)   =>  List(a.iter().cloned().chain([b_id]).collect());
+                            String(a),  List(b)     =>  String(a.clone() + &self.join_list(b, ""));
+
+                            Integer(a), Integer(b)  =>  Integer(a + b);
+                            Float(a),   Float(b)    =>  Float(a + b);
+                            Boolean(a), Boolean(b)  =>  Integer(*a as i64 + *b as i64);
+
+                            Null(),     Null()      =>  Null();
+
+                            % both ways
+                            List(a),    _           =>  List(a.iter().cloned().chain([b_id]).collect());
+                            String(a),  b           =>  String(a.clone() + &b.to_string(&self.memory));
+
+                            Integer(a), Float(b)    =>  Float(*a as f64 + b);
+
+                            Boolean(a), Integer(b)  =>  Integer(*a as i64 + b);
+                            Boolean(a), Float(b)    =>  Float(if *a { 1.0 } else { 0.0 } + b);
+
+                            Null(),     Integer(b)  =>  Integer(*b);
+                            Null(),     Float(b)    =>  Float(*b);
+                            Null(),     Boolean(b)  =>  Integer(*b as i64);
                         }
                     }
                 }
@@ -234,17 +276,15 @@ impl Interpreter {
                     let value = &self.memory[*self.stack.last().unwrap()];
                     match &value.data {
                         ValueType::List(list) => {
-                            let list = list.iter().map(|&v| self.memory[v].to_string(&self.memory)).collect::<Vec<_>>();
                             match mode {
-                                Default | NoNewline       => print!("{}", list.join("")),
-                                Spaces  | NoNewlineSpaces => print!("{}", list.join(" ")),
+                                Default | NoNewline       => print!("{}", self.join_list(list, "")),
+                                Spaces  | NoNewlineSpaces => print!("{}", self.join_list(list, " ")),
                             }
                         }
                         _ => {
                             let value = value.to_string(&self.memory);
                             match mode {
                                 Default | NoNewline       => print!("{}", value),
-                                #[allow(unstable_name_collisions)]
                                 Spaces  | NoNewlineSpaces => print!("{}", value.chars().intersperse(' ').collect::<String>()),
                             }
                         }

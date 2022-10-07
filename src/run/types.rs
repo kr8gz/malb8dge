@@ -68,9 +68,9 @@ macro_rules! types {
 types! {
     Function(Function),
     List(Vec<usize>),
-    Boolean(bool),
     String(String),
     Integer(i64),
     Float(f64),
+    Boolean(bool),
     Null(),
 }
