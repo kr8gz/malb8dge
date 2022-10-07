@@ -1,5 +1,5 @@
-pub(crate) mod lexer;
-pub(crate) mod tokens;
+pub mod lexer;
+pub mod tokens;
 
 #[cfg(test)]
-pub(crate) mod tests;
+pub mod tests;

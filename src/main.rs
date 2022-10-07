@@ -1,9 +1,6 @@
-use std::{env, process};
+use std::env;
 
-use ariadne::{Color, Fmt};
-
-mod operators;
-mod errors;
+mod util;
 
 mod lex;
 mod parse;
@@ -14,10 +11,7 @@ fn main() {
     let mut args = env::args();
     args.next(); // first arg is the location of the .exe
 
-    let file = args.next().unwrap_or_else(|| {
-        eprintln!("{} Missing required argument: filename", "Error:".fg(Color::Red));
-        process::exit(1)
-    });
+    let file = args.next().unwrap_or_else(|| util::errors::simple("Missing required argument: filename".into()));
 
     macro_rules! parse_args {
         ( $( $var:ident: $arg:literal, )* ) => {
@@ -27,29 +21,25 @@ fn main() {
                 match arg.as_str() {
                     $(
                         $arg => {
-                            if $var {
-                                eprintln!("{} Duplicate argument '{arg}'", "Error:".fg(Color::Red));
-                                process::exit(1)
-                            }
+                            if $var { util::errors::simple(format!("Duplicate argument '{arg}'")); }
                             $var = true;
                         }
                     )*
-                    _ => {
-                        eprintln!("{} Invalid argument '{arg}'", "Error:".fg(Color::Red));
-                        process::exit(1)
-                    }
+                    _ => util::errors::simple(format!("Invalid argument '{arg}'"))
                 }
             }
         }
     }
 
     parse_args! {
+        debug: "-d",
         warnings: "-w",
     };
     
     let lexer = lex::lexer::Lexer::from_file(file);
     let parser = parse::parser::Parser::new(lexer);
-    println!("{:#?}", &parser);
+    if debug { println!("{:#?}", &parser); }
     let compiler = compile::compiler::Compiler::new(parser, warnings);
-    println!("{:#?}", &compiler);
+    if debug { println!("{:#?}", &compiler); }
+    run::interpreter::Interpreter::run(compiler);
 }

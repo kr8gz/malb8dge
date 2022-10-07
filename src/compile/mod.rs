@@ -1,2 +1,2 @@
-pub(crate) mod compiler;
-pub(crate) mod instructions;
+pub mod compiler;
+pub mod instructions;

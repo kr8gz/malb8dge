@@ -1,11 +1,9 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Index};
 
-use crate::parse::ast::Keyword;
+use crate::{parse::ast::PrintMode, util::Pos};
 
 type Id = usize;
 type Len = usize;
-type Mode = usize;
-type Idx = usize;
 
 #[derive(Debug)]
 pub struct Stack<T>(pub Vec<T>);
@@ -17,7 +15,7 @@ impl<T> Stack<T> {
 }
 
 impl<T: PartialEq> Stack<T> {
-    pub fn add(&mut self, value: T) -> Id {
+    pub fn push(&mut self, value: T) -> Id {
         match self.0.iter().position(|v| v == &value) {
             Some(id) => id,
             None => {
@@ -28,26 +26,22 @@ impl<T: PartialEq> Stack<T> {
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub enum Constant {
-    Keyword(Keyword),
-    Literal(String),
-    Integer(u32),
-    Float(f64),
+impl<T> Index<usize> for Stack<T> {
+    type Output = T;
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
+    }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Function {
-    pub instructions: Vec<Instruction>,
+    pub instructions: Vec<InstrData>,
     pub args: Vec<Id>,
 }
 
 impl Function {
-    pub fn new() -> Self {
-        Self {
-            instructions: Vec::new(),
-            args: Vec::new(),
-        }
+    pub fn new(args: Vec<Id>) -> Self {
+        Self { instructions: Vec::new(), args }
     }
 }
 
@@ -58,7 +52,7 @@ pub struct Scope {
     pub children: Vec<usize>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Instruction {
     LoadConst(Id),
     LoadVar(Id),
@@ -71,7 +65,7 @@ pub enum Instruction {
     BinaryOp(Id), // s1 X s0
     BinaryIndex, // s1.s0
 
-    Print(Mode),
+    Print(PrintMode),
     Input,
 
     PopOne,
@@ -80,4 +74,10 @@ pub enum Instruction {
     RotThree, // top goes 2 back
 
     Exit,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct InstrData {
+    pub data: Instruction,
+    pub pos: Pos,
 }

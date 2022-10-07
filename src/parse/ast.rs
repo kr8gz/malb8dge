@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::{lex::tokens::*, operators::*};
+use crate::{lex::tokens::*, util::*};
 
 type BNode = Box<Node>;
 type ONode = Box<Option<Node>>;
@@ -32,20 +32,21 @@ pub enum NodeType {
     FnCall { target: BNode, args: VNode },
     Index { target: BNode, index: BNode },
     Slice { target: BNode, start: ONode, stop: ONode, step: ONode },
-    BracketIndex { target: BNode, mode: IndexMode, value: BNode }, // index of, count, contains, ...
-    BracketIter { target: BNode, mode: IterMode, expr: BNode }, // sum, filter, print, ...
+    BracketIndex { target: BNode, mode: IndexMode, value: BNode },
+    BracketIter { target: BNode, mode: IterMode, expr: BNode },
     BraceIter { target: BNode, mode: IterMode },
-    Replace { target: BNode, mode: ReplaceMode, pairs: ZipLonger<Vec<ParsedFragment>> },
-    CharReplace { target: BNode, mode: ReplaceMode, pairs: ZipLonger<char> },
-    Print { value: ONode, mode: PrintMode },
+    Replace { target: BNode, mode: ReplaceMode, left: Vec<Vec<ParsedFragment>>, right: Vec<Vec<ParsedFragment>> },
+    CharReplace { target: BNode, mode: ReplaceMode, left: Vec<char>, right: Vec<char> },
+    Print { value: BNode, mode: PrintMode },
     Input { prompt: ONode, mode: InputMode },
-    Group(BNode), // might not be needed after dealing with precedence and stuff
+    Group(BNode),
     List(VNode),
     Variable(String),
     String(Vec<ParsedFragment>),
-    Keyword(Keyword),
-    Integer(u32),
+    Integer(i64),
     Float(f64),
+    Boolean(bool),
+    Null,
 }
 
 impl Display for NodeType {
@@ -80,10 +81,11 @@ impl Display for NodeType {
                 "~" => "loop variable".into(),
                 _ => format!("variable '{var}'")
             },
-            Self::Keyword(kw) => format!("keyword '{}'", kw.to_string()),
             Self::String(_) => "string".into(),
             Self::Integer(_) => "number".into(),
             Self::Float(_) => "float".into(),
+            Self::Boolean(b) => format!("keyword '{}'", b.to_string()),
+            Self::Null => "keyword 'null'".into(),
         })
     }
 }
@@ -93,7 +95,7 @@ macro_rules! enum_modes {
         $name:ident
         $( $var:ident: $sym:literal, )*
     ) => {
-        #[derive(Debug, PartialEq)]
+        #[derive(Clone, Debug, PartialEq)]
         pub enum $name {
             $( $var, )*
             Default
@@ -147,48 +149,22 @@ enum_modes! {
     IndexOf: "@",
 }
 
-#[derive(Debug, PartialEq)]
-pub enum PrintMode {
-    Normal = 0,
-    Spaces = 1,
-    NoNewline = 2,
+enum_modes! {
+    PrintMode
+
+    Spaces: "/",
+    NoNewline: "|",
+    NoNewlineSpaces: "/|",
+    // Default: ";"
 }
 
-#[derive(Debug, PartialEq)]
-pub enum InputMode {
-    String,
-    Number,
-    NumberList,
+enum_modes! {
+    InputMode
+
+    Number: "$",
+    NumberList: "#$",
+    // Default: "_"
 }
-  
-macro_rules! keywords {
-    ( $($n:ident),* ) => {
-        #[derive(Debug, PartialEq)]
-        pub enum Keyword {
-            $( $n, )*
-        }
-
-        impl Keyword {
-            pub fn from_str(s: &str) -> Option<Self> {
-                $(
-                    if s == stringify!($n).to_ascii_lowercase() {
-                        Some(Self::$n)
-                    } else
-                )* { None }
-            }
-        }
-
-        impl ToString for Keyword {
-            fn to_string(&self) -> String {
-                match self {
-                    $( Self::$n => stringify!($n).to_ascii_lowercase(), )*
-                }
-            }
-        }
-    }
-}
-
-keywords! { True, False, Null }
 
 #[derive(Debug)]
 pub enum ParsedFragment {

@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::operators::Pos;
+use crate::util::Pos;
 
 use super::lexer::*;
 
@@ -17,7 +17,7 @@ pub enum TokenType {
     Replace(ReplaceData<Vec<LexedFragment>>),
     CharReplace(ReplaceData<char>),
     String(Vec<LexedFragment>),
-    Integer(u32),
+    Integer(i64),
     Float(f64),
     Symbol(String),
     Eof,

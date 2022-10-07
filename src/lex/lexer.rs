@@ -1,8 +1,8 @@
-use std::{fs, process};
+use std::fs;
 
-use ariadne::{Fmt, Color, ReportKind};
+use ariadne::ReportKind;
 
-use crate::{operators::{self, OpType::*}, errors::*};
+use crate::util::{operators::{self, OpType::*}, errors::{self, *}};
 
 use super::tokens::*;
 
@@ -36,8 +36,7 @@ pub struct Lexer {
 impl Lexer {
     pub fn from_file(file: String) -> Self {
         let code = fs::read_to_string(&file).unwrap_or_else(|err| {
-            eprintln!("{} {err}", "Error:".fg(Color::Red));
-            process::exit(1);
+            errors::simple(err.to_string())
         });
 
         Self::from_str(file, code, 0)
@@ -407,6 +406,12 @@ impl Lexer {
             number.pop();
         }
 
+        if let Some(Token { value: TokenType::Symbol(sym), .. }) = self.tokens.last() {
+            if sym == "-" {
+                self.tokens.pop();
+                number.insert(0, '-');
+            }
+        }
 
         self.push(match number.parse() {
             Ok(n) => TokenType::Integer(n),
@@ -432,7 +437,7 @@ impl Lexer {
             if next != ' ' && (
                 // continue the symbol if it's either...
                 // - `symbol + next` creates one of the combined symbols
-                operators::is_combined_sym(&format!("{symbol}{next}"))
+                operators::COMBINED_SYMBOLS.contains(&format!("{symbol}{next}").as_str())
                 // - or `symbol` is a binary operator and `next` is '=' (augmented assignment)
                 || operators::is_op(Binary, &symbol) && next == '='
             ) {

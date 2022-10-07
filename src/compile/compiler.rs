@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use ariadne::ReportKind;
 
-use crate::{parse::{ast::*, parser::*}, errors::Error, operators::{self, OpType, Pos}};
+use crate::{parse::{ast::*, parser::*}, util::{errors::Error, operators::{self, OpType}, Pos}, run::types::*};
 
 use super::instructions::*;
 
@@ -10,7 +10,7 @@ use super::instructions::*;
 pub struct Compiler {
     pub file: String,
 
-    pub constants: Stack<Constant>,
+    pub constants: Stack<Value>,
     pub functions: Vec<Function>,
     pub scopes: Vec<Scope>,
     pub var_count: usize,
@@ -35,28 +35,30 @@ impl Compiler {
         compiler
     }
 
-    fn warn(&self, msg: &str) -> Error {
-        Error::new(self.file.clone(), msg, ReportKind::Warning)
+    fn warn<F: Fn(Error) -> Error>(&self, msg: &str, err_fn: F) {
+        if self.show_warnings {
+            err_fn(Error::new(self.file.clone(), msg, ReportKind::Warning)).print()
+        }
     }
 
     fn error(&self, msg: &str) -> Error {
         Error::new(self.file.clone(), msg, ReportKind::Error)
     }
 
-    fn push_instr(&mut self, instr: Instruction, func: usize) {
-        self.functions[func].instructions.push(instr);
+    fn push_instr(&mut self, instr: Instruction, pos: &Pos, func: usize) {
+        self.functions[func].instructions.push(InstrData { data: instr, pos: pos.clone() });
     }
 
-    fn push_const(&mut self, constant: Constant, func: usize) {
-        let id = self.constants.add(constant);
-        self.push_instr(Instruction::LoadConst(id), func);
+    fn push_const(&mut self, constant: ValueType, pos: &Pos, func: usize) {
+        let id = self.constants.push(constant.into_value(pos));
+        self.push_instr(Instruction::LoadConst(id), pos, func);
     }
 
-    fn push_op(&mut self, op_type: OpType, op: &str, func: usize) {
+    fn push_op(&mut self, op_type: OpType, op: &str, pos: &Pos, func: usize) {
         let id = operators::op_id(op_type, op);
         match op_type {
-            OpType::Before | OpType::After => self.push_instr(Instruction::UnaryOp(id), func),
-            OpType::Binary => self.push_instr(Instruction::BinaryOp(id), func),
+            OpType::Before | OpType::After => self.push_instr(Instruction::UnaryOp(id), pos, func),
+            OpType::Binary => self.push_instr(Instruction::BinaryOp(id), pos, func),
             _ => panic!()
         }
     }
@@ -98,63 +100,60 @@ impl Compiler {
             parent: None,
             children: Vec::new(),
         });
-        self.functions.push(Function::new());
+        self.functions.push(Function::new(Vec::new()));
 
         for statement in statements {
             self.compile_statement(statement, 0, 0);
         }
     }
 
-    fn compile_or_null<F: Fn(&mut Self, Node)>(&mut self, node: Option<Node>, func: usize, f: F) {
-        match node {
-            Some(node) => f(self, node),
-            None => self.push_const(Constant::Keyword(Keyword::Null), func),
-        }
-    }
+    fn compile_assign(&mut self, node: Node, is_expr: bool, scope: usize, func: usize) {
+        if let Node { data: NodeType::Assign { target, op, value }, ref pos } = node {
+            if !op.is_empty() {
+                match target.data {
+                    NodeType::Index { target, index } => {
+                        self.compile_node(*target, scope, func);
+                        self.compile_node(*index, scope, func);
+                        self.push_instr(Instruction::DupTwo, pos, func); // duplicate target and index for storing later
+                        self.push_instr(Instruction::BinaryIndex, pos, func);
+                        self.compile_node(*value, scope, func);
+                        self.push_op(OpType::Binary, &op, pos, func);
+                        if is_expr { self.push_instr(Instruction::DupOne, pos, func); }
+                        self.push_instr(Instruction::RotThree, pos, func);
+                        self.push_instr(Instruction::StoreIndex, pos, func);
+                    }
 
-    fn compile_assign(&mut self, target: Node, op: String, value: Node, is_expr: bool, scope: usize, func: usize) {
-        if !op.is_empty() {
-            match target.data {
-                NodeType::Index { target, index } => {
-                    self.compile_node(*target, scope, func);
-                    self.compile_node(*index, scope, func);
-                    self.push_instr(Instruction::DupTwo, func); // duplicate target and index for storing
-                    self.push_instr(Instruction::BinaryIndex, func);
-                    self.compile_node(value, scope, func);
-                    self.push_op(OpType::Binary, &op, func);
-                    if is_expr { self.push_instr(Instruction::DupOne, func); }
-                    self.push_instr(Instruction::RotThree, func);
-                    self.push_instr(Instruction::StoreIndex, func);
+                    NodeType::Variable(name) => {
+                        let id = self.compile_variable(&name, &target.pos, scope, func);
+                        self.compile_node(*value, scope, func);
+                        self.push_op(OpType::Binary, &op, pos, func);
+                        if is_expr { self.push_instr(Instruction::DupOne, pos, func); }
+                        self.push_instr(Instruction::StoreVar(id), pos, func);
+                    }
+
+                    _ => unreachable!()
                 }
+            } else {
+                self.compile_node(*value, scope, func);
+                if is_expr { self.push_instr(Instruction::DupOne, pos, func); }
 
-                NodeType::Variable(name) => {
-                    let id = self.compile_variable(&name, target.pos, scope, func);
-                    self.compile_node(value, scope, func);
-                    self.push_op(OpType::Binary, &op, func);
-                    if is_expr { self.push_instr(Instruction::DupOne, func); }
-                    self.push_instr(Instruction::StoreVar(id), func);
+                match target.data {
+                    NodeType::Index { target, index } => {
+                        self.compile_node(*target, scope, func);
+                        self.compile_node(*index, scope, func);
+                        self.push_instr(Instruction::StoreIndex, pos, func);
+                    }
+
+                    NodeType::Variable(name) => {
+                        let id = self.get_var(&name, scope).unwrap_or_else(|| self.new_var(&name, scope));
+                        self.push_instr(Instruction::StoreVar(id), pos, func);
+                    }
+
+                    _ => unreachable!()
                 }
-
-                _ => unreachable!()
             }
         } else {
-            self.compile_node(value, scope, func);
-            if is_expr { self.push_instr(Instruction::DupOne, func); }
-
-            match target.data {
-                NodeType::Index { target, index } => {
-                    self.compile_node(*target, scope, func);
-                    self.compile_node(*index, scope, func);
-                    self.push_instr(Instruction::StoreIndex, func);
-                }
-
-                NodeType::Variable(name) => {
-                    let id = self.get_var(&name, scope).unwrap_or_else(|| self.new_var(&name, scope));
-                    self.push_instr(Instruction::StoreVar(id), func);
-                }
-
-                _ => unreachable!()
-            }
+            panic!();
         }
     }
 
@@ -166,8 +165,8 @@ impl Compiler {
                 }
             }
 
-            NodeType::Assign { target, op, value } => {
-                self.compile_assign(*target, op, *value, true, scope, func);
+            NodeType::Assign { .. } => {
+                self.compile_assign(node, true, scope, func);
             }
 
             NodeType::MultipleAssign { targets, value } => {
@@ -197,14 +196,14 @@ impl Compiler {
             NodeType::UnaryOp { target, op } => {
                 // TODO if const args then run op at compile time
                 self.compile_node(*target, scope, func);
-                self.push_instr(Instruction::UnaryOp(op), func);
+                self.push_instr(Instruction::UnaryOp(op), &node.pos, func);
             },
 
             NodeType::BinOp { a, op, b } => {
                 // TODO if const args then run op at compile time
                 self.compile_node(*a, scope, func);
                 self.compile_node(*b, scope, func);
-                self.push_instr(Instruction::BinaryOp(op), func);
+                self.push_instr(Instruction::BinaryOp(op), &node.pos, func);
             },
 
             NodeType::Compare { first, chain } => {
@@ -218,7 +217,7 @@ impl Compiler {
             NodeType::Index { target, index } => {
                 self.compile_node(*target, scope, func);
                 self.compile_node(*index, scope, func);
-                self.push_instr(Instruction::BinaryIndex, func);
+                self.push_instr(Instruction::BinaryIndex, &node.pos, func);
             }
 
             NodeType::Slice { target, start, stop, step } => {
@@ -237,34 +236,30 @@ impl Compiler {
                 todo!("brace iter {target:?}, {mode:?}")
             }
 
-            NodeType::Replace { target, mode, pairs } => {
-                todo!("replace {target:?}, {mode:?}, {pairs:?}")
+            NodeType::Replace { target, mode, left, right } => {
+                todo!("replace {target:?}, {mode:?}, {left:?}, {right:?}")
             }
 
-            NodeType::CharReplace { target, mode, pairs } => {
-                todo!("char replace {target:?}, {mode:?}, {pairs:?}")
+            NodeType::CharReplace { target, mode, left, right } => {
+                todo!("char replace {target:?}, {mode:?}, {left:?}, {right:?}")
             }
 
             NodeType::Print { value, mode } => {
-                self.compile_or_null(*value, func, |s, node| {
-                    s.compile_node(node, scope, func);
-                });
-                self.push_instr(Instruction::Print(mode as usize), func);
+                self.compile_node(*value, scope, func);
+                self.push_instr(Instruction::Print(mode), &node.pos, func);
             }
 
             NodeType::Input { prompt, mode } => {
                 if let Some(prompt) = *prompt {
                     self.compile_node(prompt, scope, func);
-                    self.push_instr(Instruction::Print(PrintMode::NoNewline as usize), func);
-                    self.push_instr(Instruction::PopOne, func);
+                    self.push_instr(Instruction::Print(PrintMode::NoNewline), &node.pos, func);
+                    self.push_instr(Instruction::PopOne, &node.pos, func);
                 }
-
-                self.push_instr(Instruction::Input, func);
-                
+                self.push_instr(Instruction::Input, &node.pos, func);
                 match mode {
-                    InputMode::String => (),
-                    InputMode::Number => self.push_op(OpType::After, "$", func),
-                    InputMode::NumberList => self.push_op(OpType::After, "#$", func),
+                    InputMode::Number => self.push_op(OpType::After, "$", &node.pos, func),
+                    InputMode::NumberList => self.push_op(OpType::After, "#$", &node.pos, func),
+                    _ => ()
                 }
             }
 
@@ -277,20 +272,21 @@ impl Compiler {
                 for el in list {
                     self.compile_node(el, scope, func);
                 }
-                self.push_instr(Instruction::BuildList(len), func);
+                self.push_instr(Instruction::BuildList(len), &node.pos, func);
             }
 
             NodeType::Variable(var) => {
-                self.compile_variable(&var, node.pos, scope, func);
+                self.compile_variable(&var, &node.pos, scope, func);
             },
 
             NodeType::String(frags) => {
                 todo!("string {frags:?}")
             }
 
-            NodeType::Keyword(kw) => self.push_const(Constant::Keyword(kw), func),
-            NodeType::Integer(int) => self.push_const(Constant::Integer(int), func),
-            NodeType::Float(float) => self.push_const(Constant::Float(float), func),
+            NodeType::Boolean(b) => self.push_const(ValueType::Boolean(b), &node.pos, func),
+            NodeType::Integer(int) => self.push_const(ValueType::Integer(int), &node.pos, func),
+            NodeType::Float(float) => self.push_const(ValueType::Float(float), &node.pos, func),
+            NodeType::Null => self.push_const(ValueType::Null(), &node.pos, func),
             
             _ => unreachable!()
         };
@@ -313,35 +309,42 @@ impl Compiler {
             NodeType::Exit(expr) => {
                 if let Some(expr) = *expr {
                     self.compile_node(expr, scope, func);
-                    self.push_instr(Instruction::Print(PrintMode::Normal as usize), func);
+                    self.push_instr(Instruction::Print(PrintMode::Default), &node.pos, func);
                 }
-                self.push_instr(Instruction::Exit, func);
+                self.push_instr(Instruction::Exit, &node.pos, func);
             }
 
-            NodeType::Assign { target, op, value } => {
-                self.compile_assign(*target, op, *value, false, scope, func);
+            NodeType::Assign { .. } => {
+                self.compile_assign(node, false, scope, func);
             }
 
             NodeType::MultipleAssign { targets, value } => {
                 todo!("multiple assign {targets:?}, {value:?}")
             }
 
+            NodeType::Print { value, mode } => {
+                self.compile_node(*value, scope, func);
+                self.push_instr(Instruction::Print(mode), &node.pos, func);
+                self.push_instr(Instruction::PopOne, &node.pos, func);
+            }
+
             _ => {
+                let pos = node.pos.clone();
                 self.compile_node(node, scope, func);
-                self.push_instr(Instruction::PopOne, func);
+                self.push_instr(Instruction::PopOne, &pos, func);
             }
         }
     }
 
-    fn compile_variable(&mut self, var: &str, pos: Pos, scope: usize, func: usize) -> usize {
+    fn compile_variable(&mut self, var: &str, pos: &Pos, scope: usize, func: usize) -> usize {
         match self.get_var(var, scope) {
             Some(id) => {
-                self.push_instr(Instruction::LoadVar(id), func);
+                self.push_instr(Instruction::LoadVar(id), pos, func);
                 id
             },
             None => {
                 self.error("Use of undefined variable")
-                    .label(pos, format!("Couldn't find variable '{var}' in this scope"))
+                    .label(pos.clone(), format!("Couldn't find variable '{var}' in this scope"))
                     .eprint();
             }
         }

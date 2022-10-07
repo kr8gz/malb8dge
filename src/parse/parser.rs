@@ -1,12 +1,12 @@
-use std::{iter, fmt};
+use std::fmt;
 
-use ariadne::ReportKind;
+use ariadne::{ReportKind, Fmt, Color};
 
-use crate::{parse::ast::*, operators::{self, *, OpType::*}, lex::{lexer::*, tokens::*}, errors::*};
+use crate::{parse::ast::*, util::{*, errors::*, operators::{self, *, OpType::*}}, lex::{lexer::*, tokens::*}};
 
 #[derive(Debug)]
 pub struct Parser {
-    eof: Token,
+    pub eof: usize,
 
     pub file: String,
     pub tokens: Vec<Token>,
@@ -24,14 +24,8 @@ pub struct Parser {
 
 impl Parser {
     pub fn new(lexer: Lexer) -> Self {
-        let eof_pos = lexer.tokens.last().map(|t| t.pos.end).unwrap_or(0);
-
         let mut parser = Self {
-            eof: Token {
-                value: TokenType::Eof,
-                macro_data: None,
-                pos: eof_pos..eof_pos,
-            },
+            eof: lexer.tokens.last().map(|t| t.pos.end).unwrap_or(0),
 
             file: lexer.file,
             tokens: lexer.tokens,
@@ -56,9 +50,9 @@ impl Parser {
         Error::new(self.file.clone(), msg, ReportKind::Error)
     }
 
-    fn expected<T: fmt::Display>(&self, pos: Pos, expected: &str, found: T) -> Error {
+    fn expected<E: fmt::Display, F: fmt::Display>(&self, pos: Pos, expected: E, found: F) -> Error {
         self.error("Syntax error")
-            .label(pos, format!("Expected {}, found {}", expected, found))
+            .label(pos, format!("Expected {}, found {}", expected.fg(Color::Green), found.fg(Color::Red)))
     }
 
     fn expected_bracket(&mut self, open_pos: Pos, bracket: &str, has_value: bool) {
@@ -67,9 +61,10 @@ impl Parser {
             self.error("Syntax error")
                 .label(open_pos, "Opening bracket here")
                 .label(next.pos, format!(
-                    "Expected {} or '{bracket}', found {}",
-                    if has_value { "value separator" } else { "value" },
-                    next.value
+                    "Expected {} or '{}', found {}",
+                    if has_value { "value separator" } else { "value" }.fg(Color::Green),
+                                                                bracket.fg(Color::Green),
+                                                             next.value.fg(Color::Red),
                 ))
                 .eprint();
         }
@@ -78,7 +73,7 @@ impl Parser {
     fn statement_sep(&mut self) {
         let next = self.next();
         if !next.value.is("\n") && !next.value.is(";") && !next.value.eof() {
-            self.expected(next.pos, "statement terminator", next.value).eprint()
+            self.expected(next.pos, "statement terminator".fg(Color::Green), next.value.fg(Color::Red)).eprint()
         }
     }
 
@@ -91,7 +86,7 @@ impl Parser {
             _ => {
                 self.error("Syntax error")
                     .label(self.curr().pos, format!("Found {found} here"))
-                    .label(node.pos, format!("Expected {expected}, found {}", node.data))
+                    .label(node.pos, format!("Expected {}, found {}", expected.fg(Color::Green), node.data.fg(Color::Red)))
                     .eprint();
             }
         };
@@ -132,7 +127,11 @@ impl Parser {
     }
 
     fn curr(&self) -> Token {
-        self.tokens.get(self.token_index - 1).cloned().unwrap_or_else(|| self.eof.clone())
+        self.tokens.get(self.token_index - 1).cloned().unwrap_or(Token {
+            value: TokenType::Eof,
+            macro_data: None,
+            pos: self.eof..self.eof,
+        })
     }
 
     fn prev(&mut self) {
@@ -241,9 +240,10 @@ impl Parser {
             TokenType::Float(float) => NodeType::Float(float),
 
             TokenType::Identifier(id) => {
-                match Keyword::from_str(&id) {
-                    Some(kw) => NodeType::Keyword(kw),
-                    None => NodeType::Variable(id),
+                match id.as_str() {
+                    "true" | "false" => NodeType::Boolean(id.parse().unwrap()),
+                    "null" => NodeType::Null,
+                    _ => NodeType::Variable(id),
                 }
             },
 
@@ -291,40 +291,30 @@ impl Parser {
                     }
                 },
 
-                ";" | "/" | "|" => NodeType::Print {
+                ";" | "/" | "|" | "/|" => NodeType::Print {
+                    mode: PrintMode::from_token(&self.curr()),
                     value: Box::new({
                         let start = self.peek().pos.start;
                         let mut list = self.parse_list(None);
 
-                        if list.is_empty() {
-                            None
-                        } else {
-                            Some(Node {
-                                data: if list.len() > 1 || matches!(list[0].data, NodeType::List(_)) {
+                        Node {
+                            pos: start..self.pos_end(),
+                            data: {
+                                if list.is_empty() {
+                                    NodeType::Null
+                                } else if list.len() > 1 || matches!(list[0].data, NodeType::List(_)) {
                                     NodeType::List(list)
                                 } else {
-                                    list.remove(0).data
-                                },
-                                pos: start..self.pos_end(),
-                            })
+                                    list.swap_remove(0).data
+                                }
+                            },
                         }
                     }),
-                    mode: match sym.as_str() {
-                        ";" => PrintMode::Normal,
-                        "/" => PrintMode::Spaces,
-                        "|" => PrintMode::NoNewline,
-                        _ => unreachable!()
-                    },
                 },
 
                 "_" | "$" | "#$" =>  NodeType::Input {
+                    mode: InputMode::from_token(&self.curr()),
                     prompt: Box::new(None),
-                    mode: match sym.as_str() {
-                        "_" => InputMode::String,
-                        "$" => InputMode::Number,
-                        "#$" => InputMode::NumberList,
-                        _ => unreachable!()
-                    },
                 },
 
                 op @ ("++" | "--") => {
@@ -341,7 +331,7 @@ impl Parser {
                             if !matches!(val.data, NodeType::Variable(_) | NodeType::Index { .. } ) {
                                 self.error("Syntax error")
                                     .label(pos, format!("Found {verb} operator here"))
-                                    .label(val.pos, format!("Expected variable, found {}", val.data))
+                                    .label(val.pos, format!("Expected {}, found {}", "variable".fg(Color::Green), val.data.fg(Color::Red)))
                                     .note(format!("Only variables can be {verb}ed"))
                                     .eprint()
                             }
@@ -586,7 +576,7 @@ impl Parser {
 
     fn parse_operation(&mut self, prec: usize, optional: bool) -> Option<Node> {
         let mut next_prec = operators::MAX_PREC.min(prec + 1);
-        while next_prec != operators::MAX_PREC && !operators::is_bin_type(next_prec) {
+        while next_prec != operators::MAX_PREC && operators::prec_type(next_prec) == PrecType::Before {
             next_prec += 1;
         }
 
@@ -606,7 +596,7 @@ impl Parser {
 
         if prec_type == PrecType::Compare {
             let mut chain = Vec::new();
-
+            
             while let TokenType::Symbol(op) = self.next().value {
                 if operators::op_prec(op_type, &op) != prec { break }
                 chain.push((op, Box::new(parse_operand!())));
@@ -622,7 +612,7 @@ impl Parser {
                 };
             }
             self.prev();
-        } else if op_type == Binary {
+        } else if prec_type != PrecType::Before {
             while let TokenType::Symbol(op) = self.next().value {
                 if operators::op_prec(op_type, &op) != prec { break }
                 
@@ -732,30 +722,31 @@ impl Parser {
             let Token { value, pos, .. } = self.next();
             
             let data = match value {
-                TokenType::Replace(rd) => NodeType::Replace {
-                    target: Box::new(parsed_value),
-                    mode: rd.mode,
-
-                    pairs: {
-                        // please help me
-                        macro_rules! map_frags {
-                            ( $v:expr ) => {
-                                $v.into_iter().map(
-                                    |v| v.into_iter().map(
-                                        |f| self.parse_fragment(f)
-                                    ).collect()
+                TokenType::Replace(rd) => {
+                    // please help me
+                    macro_rules! map_frags {
+                        ( $v:expr ) => {
+                            $v.into_iter().map(
+                                |v| v.into_iter().map(
+                                    |f| self.parse_fragment(f)
                                 ).collect()
-                            }
+                            ).collect()
                         }
+                    }
 
-                        zip_longer(map_frags!(rd.left), map_frags!(rd.right))
+                    NodeType::Replace {
+                        target: Box::new(parsed_value),
+                        mode: rd.mode,
+                        left: map_frags!(rd.left),
+                        right: map_frags!(rd.right),
                     }
                 },
 
                 TokenType::CharReplace(rd) => NodeType::CharReplace {
                     target: Box::new(parsed_value),
                     mode: rd.mode,
-                    pairs: zip_longer(rd.left, rd.right),
+                    left: rd.left,
+                    right: rd.right,
                 },
 
                 TokenType::Symbol(ref sym) => match sym.as_str() {
@@ -918,7 +909,7 @@ impl Parser {
                                 if !matches!(parsed_value.data, NodeType::Variable(_) | NodeType::Index { .. } ) {
                                     self.error("Syntax error")
                                         .label(pos, format!("Found {verb} operator here"))
-                                        .label(parsed_value.pos, format!("Expected variable, found {}", parsed_value.data))
+                                        .label(parsed_value.pos, format!("Expected {}, found {}", "variable".fg(Color::Green), parsed_value.data.fg(Color::Red)))
                                         .note(format!("Only variables can be {verb}ed"))
                                         .eprint()
                                 }
@@ -946,11 +937,4 @@ impl Parser {
 
         Some(parsed_value)
     }
-}
-
-fn zip_longer<T>(longer: Vec<T>, shorter: Vec<T>) -> ZipLonger<T> {
-    longer
-        .into_iter()
-        .zip(shorter.into_iter().map(Some).chain(iter::repeat_with(|| None)))
-        .collect()
 }

@@ -2,7 +2,7 @@ use ariadne::*;
 
 use std::{fs, process};
 
-use crate::operators::Pos;
+use super::Pos;
 
 struct ColorGenerator {
     hue: f64,
@@ -142,4 +142,9 @@ impl Error {
         self.print();
         process::exit(1);
     }
+}
+
+pub fn simple(msg: String) -> ! {
+    eprintln!("{} {msg}", "Error:".fg(Color::Red));
+    process::exit(1)
 }
