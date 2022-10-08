@@ -10,7 +10,7 @@ macro_rules! token_test {
     } => {
         #[test]
         fn $name() {
-            let lexer = Lexer::from_str(FILENAME.into(), $code.into(), 0);
+            let lexer = lex!($code, 0);
             let tokens = dbg!(lexer.tokens); // only prints on fail
 
             let mut i = 0;
@@ -28,8 +28,12 @@ macro_rules! token_test {
 }
 
 macro_rules! lex {
-    ( $code:literal, $offset:expr ) => {
-        Lexer::from_str(FILENAME.into(), $code.into(), $offset )
+    ( $code:expr, $offset:expr ) => {
+        {
+            let mut lexer = Lexer::from_str($code.into(), $offset);
+            lexer.lex().unwrap_or_else(|e| e.eprint(FILENAME));
+            lexer
+        }
     }
 }
 

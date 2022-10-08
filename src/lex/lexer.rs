@@ -1,8 +1,6 @@
 use std::fs;
 
-use ariadne::ReportKind;
-
-use crate::util::{operators::{self, OpType::*}, errors::{self, *}};
+use crate::util::{*, errors::{self, Error}, operators::{self, OpType::*}};
 
 use super::tokens::*;
 
@@ -20,7 +18,6 @@ enum ReplaceLexStep {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Lexer {
-    pub file: String,
     pub chars: Vec<char>,
 
     pub tokens: Vec<Token>,
@@ -34,17 +31,16 @@ pub struct Lexer {
 }
 
 impl Lexer {
-    pub fn from_file(file: String) -> Self {
-        let code = fs::read_to_string(&file).unwrap_or_else(|err| {
+    pub fn from_file(file: &str) -> Self {
+        let code = fs::read_to_string(file).unwrap_or_else(|err| {
             errors::simple(err.to_string())
         });
 
-        Self::from_str(file, code, 0)
+        Self::from_str(code, 0)
     }
 
-    pub fn from_str(file: String, code: String, offset: usize) -> Self {
-        let mut lexer = Self {
-            file,
+    pub fn from_str(code: String, offset: usize) -> Self {
+        Self {
             chars: code.replace("\r\n", "\n").chars().collect(),
 
             char_index: 0,
@@ -54,14 +50,7 @@ impl Lexer {
             floating_point_override: false,
 
             tokens: Vec::new(),
-        };
-
-        lexer.lex();
-        lexer
-    }
-
-    fn error(&self, msg: &str) -> Error {
-        Error::new(self.file.clone(), msg, ReportKind::Error)
+        }
     }
     
     fn next(&mut self) -> Option<char> {
@@ -77,22 +66,23 @@ impl Lexer {
         }
     }
     
-    fn lex(&mut self) {
+    pub fn lex(&mut self) -> Result<()> {
         while let Some(next) = self.next() {
             self.token_start = self.actual_pos - 1;
 
             if next.is_alphabetic() {
                 self.lex_identifier(next);
             } else if next == '\\' {
-                self.lex_replace();
+                self.lex_replace()?;
             } else if next == '"' {
-                self.lex_string();
+                self.lex_string()?;
             } else if next.is_ascii_digit() {
-                self.lex_number(next);
+                self.lex_number(next)?;
             } else if !" \t".contains(next) {
                 self.lex_symbol(next);
             }
         }
+        Ok(())
     }
 
     fn push(&mut self, value: TokenType) {
@@ -118,7 +108,7 @@ impl Lexer {
         self.push(TokenType::Identifier(identifier));
     }
 
-    fn lex_replace(&mut self) {
+    fn lex_replace(&mut self) -> Result<()> {
         let mut replace_mode = ReplaceMode::Normal;
         let mut step = ReplaceLexStep::LeftPattern;
         let char_mode = self.next() == Some('\\');
@@ -179,11 +169,13 @@ impl Lexer {
                     }
                 }
 
-                if if char_mode { push_target.is_empty() } else { pattern.is_empty() } {
-                    self.error("Find pattern cannot be empty")
-                        .label(self.token_start..self.actual_pos, "No find pattern provided")
-                        .help("Add a find pattern")
-                        .eprint();
+                let is_empty = if char_mode { push_target.is_empty() } else { pattern.is_empty() };
+                if is_empty {
+                    return Err(
+                        Error::err("Find pattern cannot be empty")
+                            .label(self.token_start..self.actual_pos, "No find pattern provided")
+                            .help("Add a find pattern")
+                    )
                 }
 
                 if char_mode {
@@ -214,7 +206,7 @@ impl Lexer {
                 brace_depth -= 1;
 
                 if brace_depth == 0 {
-                    fragments.push(self.lex_expr_frag(push_target, frag_start));
+                    fragments.push(self.lex_expr_frag(push_target, frag_start)?);
                     push_target = String::new();
                 } else {
                     push_target.push('}');
@@ -229,8 +221,7 @@ impl Lexer {
         if step == ReplaceLexStep::LeftPattern {
             self.prev();
 
-            let mut err = self
-                .error("Unfinished replace expression")
+            let mut err = Error::err("Unfinished replace expression")
                 .label(self.token_start..self.actual_pos, "This replace expression doesn't have a replace mode specified")
                 .label(self.actual_pos..self.actual_pos, "Unexpected end of file");
     
@@ -240,7 +231,7 @@ impl Lexer {
                 err = err.help("Add a replace mode specifier and optionally a replace pattern");
             }
     
-            err.eprint();
+            return Err(err)
         }
 
         let is_swap = replace_mode == ReplaceMode::Swap;
@@ -260,7 +251,7 @@ impl Lexer {
         else {
             if !push_target.is_empty() {
                 fragments.push(if brace_depth > 0 {
-                    self.lex_expr_frag(push_target, frag_start)
+                    self.lex_expr_frag(push_target, frag_start)?
                 } else {
                     LexedFragment::Literal(push_target)
                 });
@@ -278,37 +269,40 @@ impl Lexer {
         }
 
         if is_swap && len_l != len_r {
-            self.error("Different number of swap pattern values")
-                .label(
-                    left_start..right_start - 1, 
-                    fmt_plural!("Left side has {} value{}", len_l)
-                )
-                .label(
-                    right_start..self.actual_pos - 1,
-                    fmt_plural!("Right side has {} value{}", len_r)
-                )
-                .help("Add or remove some values to balance both sides")
-                .eprint();
+            return Err(
+                Error::err("Different number of swap pattern values")
+                    .label(
+                        left_start..right_start - 1, 
+                        fmt_plural!("Left side has {} value{}", len_l)
+                    )
+                    .label(
+                        right_start..self.actual_pos - 1,
+                        fmt_plural!("Right side has {} value{}", len_r)
+                    )
+                    .help("Add or remove some values to balance both sides")
+            )
         }
         
         else if len_l < len_r {
-            self.error("More replace values than find values")
-                .label(
-                    left_start..right_start - 1,
-                    fmt_plural!("Found {} find value{}", len_l)
-                )
-                .label(
-                    right_start..self.actual_pos - 1,
-                    fmt_plural!("Found {} replace value{}", len_r)
-                )
-                .help("Add more find values or remove some replace values")
-                .eprint();
+            return Err(
+                Error::err("More replace values than find values")
+                    .label(
+                        left_start..right_start - 1,
+                        fmt_plural!("Found {} find value{}", len_l)
+                    )
+                    .label(
+                        right_start..self.actual_pos - 1,
+                        fmt_plural!("Found {} replace value{}", len_r)
+                    )
+                    .help("Add more find values or remove some replace values")
+            )
         }
 
         self.push(token_value);
+        Ok(())
     }
     
-    fn lex_string(&mut self) {
+    fn lex_string(&mut self) -> Result<()> {
         let mut frag = String::new();
         let mut fragments = Vec::new();
 
@@ -354,7 +348,7 @@ impl Lexer {
                 brace_depth -= 1;
                 
                 if brace_depth == 0 {
-                    fragments.push(self.lex_expr_frag(frag, frag_start));
+                    fragments.push(self.lex_expr_frag(frag, frag_start)?);
                     frag = String::new();
                 } else {
                     frag.push('}');
@@ -367,14 +361,15 @@ impl Lexer {
         }
 
         fragments.push(if brace_depth > 0 {
-            self.lex_expr_frag(frag, frag_start)
+            self.lex_expr_frag(frag, frag_start)?
         } else {
             LexedFragment::Literal(frag)
         });
         self.push(TokenType::String(fragments));
+        Ok(())
    }
     
-    fn lex_number(&mut self, first: char) {
+    fn lex_number(&mut self, first: char) -> Result<()> {
         let mut number = String::from(first);
         let mut float = false;
         let mut scientific = false;
@@ -406,27 +401,20 @@ impl Lexer {
             number.pop();
         }
 
-        if let Some(Token { value: TokenType::Symbol(sym), .. }) = self.tokens.last() {
-            if sym == "-" {
-                self.tokens.pop();
-                number.insert(0, '-');
-            }
-        }
-
         self.push(match number.parse() {
             Ok(n) => TokenType::Integer(n),
             Err(_) => {
                 match number.parse() {
                     Ok(n) => TokenType::Float(n),
-                    Err(_) => {
-                        self.error("wtf error")
+                    Err(_) => return Err(
+                        Error::err("wtf error")
                             .label(self.token_start..self.actual_pos, "what did you do")
                             .help("stop")
-                            .eprint();
-                    }
+                    )
                 }
             }
         });
+        Ok(())
     }
     
     fn lex_symbol(&mut self, first: char) {
@@ -462,7 +450,9 @@ impl Lexer {
         self.push(TokenType::Symbol(symbol));
     }
 
-    fn lex_expr_frag(&self, expr: String, offset: usize) -> LexedFragment {
-        LexedFragment::Expr(Lexer::from_str(self.file.clone(), expr, offset))
+    fn lex_expr_frag(&self, expr: String, offset: usize) -> Result<LexedFragment> {
+        let mut lexer = Lexer::from_str(expr, offset);
+        lexer.lex()?;
+        Ok(LexedFragment::Expr(lexer))
     }
 }

@@ -1,22 +1,20 @@
-use std::{collections::HashMap, ops::Index};
+use std::{collections::HashMap, ops::{Index, IndexMut}};
 
-use crate::{parse::ast::PrintMode, util::Pos};
+use crate::{parse::ast::PrintMode, util::Pos, run::types::Value};
 
 type Id = usize;
 type Len = usize;
 
 #[derive(Debug)]
-pub struct Stack<T>(pub Vec<T>);
+pub struct Stack(pub Vec<Value>);
 
-impl<T> Stack<T> {
+impl Stack {
     pub fn new() -> Self {
         Self(Vec::new())
     }
-}
 
-impl<T: PartialEq> Stack<T> {
-    pub fn push(&mut self, value: T) -> Id {
-        match self.0.iter().position(|v| v == &value) {
+    pub fn push(&mut self, value: Value) -> Id {
+        match self.0.iter().position(|v| v.data == value.data) {
             Some(id) => id,
             None => {
                 self.0.push(value);
@@ -26,10 +24,16 @@ impl<T: PartialEq> Stack<T> {
     }
 }
 
-impl<T> Index<usize> for Stack<T> {
-    type Output = T;
+impl Index<usize> for Stack {
+    type Output = Value;
     fn index(&self, index: usize) -> &Self::Output {
         &self.0[index]
+    }
+}
+
+impl IndexMut<usize> for Stack {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.0[index]
     }
 }
 

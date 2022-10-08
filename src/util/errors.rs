@@ -50,7 +50,6 @@ impl ColorGenerator {
 }
 
 pub struct Error {
-    file: String,
     msg: String,
     kind: ReportKind,
 
@@ -60,10 +59,13 @@ pub struct Error {
 }
 
 impl Error {
-    pub fn new<T: Into<String>>(file: String, msg: T, kind: ReportKind) -> Self {
+    pub fn err<T: ToString>(msg: T) -> Self {
+        Error::new(msg, ReportKind::Error)
+    }
+
+    fn new<T: ToString>(msg: T, kind: ReportKind) -> Self {
         Self {
-            file,
-            msg: msg.into(),
+            msg: msg.to_string(),
             kind,
 
             labels: Vec::new(),
@@ -87,12 +89,12 @@ impl Error {
         self
     }
 
-    pub fn print(self) {
+    pub fn print(self, file: &str) {
         let mut colgen = ColorGenerator::new(self.labels.len());
 
         let mut report = Report::build(
             self.kind,
-            &self.file,
+            file,
             self.labels.iter().map(|(pos, _)| pos.start).min().unwrap_or(0)
         )
         .with_config(Config::default().with_cross_gap(true))
@@ -105,7 +107,7 @@ impl Error {
                     _ => Color::RGB(255, 127, 127)
                 };
                 report = report.with_label(
-                    Label::new((&self.file, pos))
+                    Label::new((file, pos))
                         .with_message(msg)
                         .with_color(color)
                 );
@@ -114,7 +116,7 @@ impl Error {
             for ((pos, msg), n) in self.labels.into_iter().zip(1..) {
                 let color = colgen.next();
                 report = report.with_label(
-                    Label::new((&self.file, pos))
+                    Label::new((file, pos))
                         .with_message(format!("{}: {}", n.to_string().fg(color), msg))
                         .with_order(n)
                         .with_color(color)
@@ -132,14 +134,14 @@ impl Error {
 
         report
             .finish()
-            .eprint((&self.file, Source::from(
-                fs::read_to_string(&self.file).unwrap().replace("\r\n", "\n")
+            .eprint((file, Source::from(
+                fs::read_to_string(file).unwrap().replace("\r\n", "\n")
             )))
             .unwrap();
     }
 
-    pub fn eprint(self) -> ! {
-        self.print();
+    pub fn eprint(self, file: &str) -> ! {
+        self.print(file);
         process::exit(1);
     }
 }

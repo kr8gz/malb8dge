@@ -84,7 +84,7 @@ impl Display for NodeType {
             Self::String(_) => "string".into(),
             Self::Integer(_) => "number".into(),
             Self::Float(_) => "float".into(),
-            Self::Boolean(b) => format!("keyword '{}'", b.to_string()),
+            Self::Boolean(b) => format!("keyword '{b}'"),
             Self::Null => "keyword 'null'".into(),
         })
     }

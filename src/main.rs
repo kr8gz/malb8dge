@@ -1,5 +1,7 @@
 use std::env;
 
+use crate::{lex::lexer::Lexer, compile::compiler::Compiler, parse::parser::Parser, run::interpreter::Interpreter};
+
 mod util;
 
 mod lex;
@@ -35,11 +37,24 @@ fn main() {
         debug: "-d",
         warnings: "-w",
     };
+
+    macro_rules! handle {
+        ( $expr:expr ) => {
+            $expr.unwrap_or_else(|e| e.eprint(&file))
+        }
+    }
     
-    let lexer = lex::lexer::Lexer::from_file(file);
-    let parser = parse::parser::Parser::new(lexer);
+    let mut lexer = Lexer::from_file(&file);
+    handle!(lexer.lex());
+    if debug { println!("{:#?}", &lexer); }
+    
+    let mut parser = Parser::new(lexer);
+    handle!(parser.parse());
     if debug { println!("{:#?}", &parser); }
-    let compiler = compile::compiler::Compiler::new(parser, warnings);
+    
+    let mut compiler = Compiler::new();
+    handle!(compiler.compile(parser.statements));
     if debug { println!("{:#?}", &compiler); }
-    run::interpreter::Interpreter::run(compiler);
+    
+    handle!(Interpreter::run(compiler));
 }

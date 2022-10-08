@@ -11,11 +11,11 @@ impl Value {
         self.data.type_name()
     }
 
-    pub fn to_string(&self, memory: &Stack<Value>) -> String {
+    pub fn to_string(&self, memory: &Stack) -> String {
         self.data.to_string(memory)
     }
 
-    fn repr(&self, memory: &Stack<Value>) -> String {
+    fn repr(&self, memory: &Stack) -> String {
         self.data.repr(memory)
     }
 }
@@ -40,7 +40,7 @@ macro_rules! types {
                 }
             }
         
-            pub fn to_string(&self, memory: &Stack<Value>) -> String {
+            pub fn to_string(&self, memory: &Stack) -> String {
                 match self {
                     Self::Function(_) => "<function>".into(),
                     Self::List(list) => {
@@ -54,7 +54,7 @@ macro_rules! types {
                 }
             }
         
-            fn repr(&self, memory: &Stack<Value>) -> String {
+            fn repr(&self, memory: &Stack) -> String {
                 match self {
                     Self::String(s) => format!("\"{s}\""),
                     Self::Null() => "null".into(),
