@@ -292,7 +292,7 @@ impl Interpreter {
                             }
 
                             % one way
-                            List(mut a), List(b)     =>  List({
+                            List(mut a), List(b)    =>  List({
                                                             for b_id in b {
                                                                 if let Some(pos) = a.iter().position(|id| *id == b_id) {
                                                                     a.remove(pos);
@@ -301,7 +301,7 @@ impl Interpreter {
                                                             a
                                                         });
 
-                            List(mut a), _           =>  List({
+                            List(mut a), _          =>  List({
                                                             if let Some(pos) = a.iter().position(|id| *id == b_id) {
                                                                 a.remove(pos);
                                                             }
