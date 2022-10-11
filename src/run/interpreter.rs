@@ -263,7 +263,7 @@ impl Interpreter {
                     bin_ops! {
                         "+" {
                             % convert {
-                                x @ Boolean(_) => Integer(self.to_int(x).unwrap());
+                                x @ Boolean(_) | x @ Null() => Integer(self.to_int(x).unwrap());
                             }
 
                             % one way
@@ -274,21 +274,16 @@ impl Interpreter {
                             Integer(a), Integer(b)  =>  Integer(a + b);
                             Float(a),   Float(b)    =>  Float(a + b);
 
-                            Null(),     Null()      =>  Null();
-
                             % both ways
                             List(a),    _           =>  List(a.into_iter().chain([b_id]).collect());
-                            String(a),  b           =>  String(a + &b.to_string(&self.memory));
+                            String(a),  b           =>  String(a + &b.to_string(&self.memory)); // TODO check if bool and null convert to int here becaseUSE THE SOHULDNT
 
                             Integer(a), Float(b)    =>  Float(a as f64 + b);
-
-                            Null(),     Integer(b)  =>  Integer(b);
-                            Null(),     Float(b)    =>  Float(b);
                         }
 
                         "-" {
                             % convert {
-                                x @ Boolean(_) => Integer(self.to_int(x).unwrap());
+                                x @ Boolean(_) | x @ Null() => Integer(self.to_int(x).unwrap());
                             }
 
                             % one way
@@ -327,12 +322,6 @@ impl Interpreter {
                             Float(a),   Float(b)    =>  Float(a - b);
                             Integer(a), Float(b)    =>  Float(a as f64 - b);
                             Float(a),   Integer(b)  =>  Float(a - b as f64);
-                            
-                            Integer(a), Null()      =>  Integer(a);
-                            Float(a),   Null()      =>  Float(a);
-                            Null(),     Integer(b)  =>  Integer(-b);
-                            Null(),     Float(b)    =>  Float(-b);
-                            Null(),     Null()      =>  Null();
                         }
                     }
                 }
