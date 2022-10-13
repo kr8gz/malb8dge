@@ -44,9 +44,33 @@ impl Interpreter {
         }
     }
 
+    fn to_string(&self, id: usize) -> String {
+        use ValueType::*;
+        match &self.memory[id].data {
+            Function(_) => "<function>".into(),
+            List(list) => {
+                format!("[{}]", list.iter().map(|&v| self.repr_string(v)).collect::<Vec<_>>().join(", "))
+            },
+            Boolean(b) => b.to_string(),
+            String(s) => s.clone(),
+            Integer(int) => int.to_string(),
+            Float(float) => float.to_string(),
+            Null() => "".into(),
+        }
+    }
+
+    fn repr_string(&self, id: usize) -> String {
+        use ValueType::*;
+        match &self.memory[id].data {
+            String(s) => format!("\"{s}\""),
+            Null() => "null".into(),
+            _ => self.to_string(id),
+        }
+    }
+
     fn join_list(&self, list: &[usize], sep: &str) -> String {
         list.iter()
-            .map(|&v| self.memory[v].to_string(&self.memory))
+            .map(|&v| self.to_string(v))
             .join(sep)
     }
 
@@ -102,18 +126,17 @@ impl Interpreter {
 
                 Instruction::StoreIndex => {
                     let index = pop!(Value);
-                    let index_pos = index.pos.clone();
                     let mut i = match self.to_int(&index.data) {
                         Some(i) => i,
                         None => return Err(
                             Error::err("Type error")
                                 .label(instr.pos.clone(), "Expected an integer as list index")
-                                .label(index_pos, "Cannot convert this to an integer")
+                                .label(index.pos.clone(), "Cannot convert this to an integer")
                         )
                     };
 
-                    let target = &mut self.memory[pop!(Id)];
-                    let target_pos = target.pos.clone(); // TODO needed??
+                    let target_id = pop!(Id);
+                    let mut target = self.memory[target_id].clone();
 
                     macro_rules! index {
                         ( $len:expr ) => {
@@ -125,8 +148,8 @@ impl Interpreter {
                                 if i < 0 || i >= len {
                                     return Err(
                                         Error::err("Index out of bounds")
-                                            .label(target_pos, format!("Length of this is {len}"))
-                                            .label(index_pos, format!("Index is {i}"))
+                                            .label(target.pos.clone(), format!("Length of this is {len}"))
+                                            .label(index.pos.clone(), format!("Index is {i}"))
                                     )
                                 }
                                 i
@@ -142,13 +165,14 @@ impl Interpreter {
 
                         ValueType::String(s) => {
                             let index = index!(s.len());
+                            let value_id = pop!(Id);
                             s.replace_range(
                                 s
                                     .char_indices()
                                     .nth(index as usize)
-                                    .map(|(pos, ch)| (pos..pos + ch.len_utf8()))
+                                    .map(|(pos, ch)| pos..pos + ch.len_utf8())
                                     .unwrap(),
-                                "x",
+                                    &self.to_string(value_id),
                             );
                         }
 
@@ -158,6 +182,8 @@ impl Interpreter {
                             .label(target.pos.clone(), "Cannot convert this to a list")
                         )
                     };
+
+                    self.memory[target_id] = target;
                 }
                 
                 Instruction::BuildList(len) => {
@@ -185,9 +211,9 @@ impl Interpreter {
                             $(
                                 $op:literal {
                                     $(
-                                        % convert {
-                                            $( $pre:pat => $expr:expr; )+
-                                        }
+                                        % convert
+                                        // can use the x_id vars to get the unconverted version
+                                        $( $pre:pat => $expr:expr; )+
                                     )?
                                     $(
                                         % one way
@@ -262,9 +288,9 @@ impl Interpreter {
                     // basically writing std lmao
                     bin_ops! {
                         "+" {
-                            % convert {
-                                x @ Boolean(_) | x @ Null() => Integer(self.to_int(x).unwrap());
-                            }
+                            % convert
+                            x @ Boolean(_) |
+                            x @ Null()              =>  Integer(self.to_int(x).unwrap());
 
                             % one way
                             List(a),    List(b)     =>  List(a.into_iter().chain(b.into_iter()).collect());
@@ -276,15 +302,15 @@ impl Interpreter {
 
                             % both ways
                             List(a),    _           =>  List(a.into_iter().chain([b_id]).collect());
-                            String(a),  b           =>  String(a + &b.to_string(&self.memory)); // TODO check if bool and null convert to int here becaseUSE THE SOHULDNT
+                            String(a),  _           =>  String(a + &self.to_string(b_id));
 
                             Integer(a), Float(b)    =>  Float(a as f64 + b);
                         }
 
                         "-" {
-                            % convert {
-                                x @ Boolean(_) | x @ Null() => Integer(self.to_int(x).unwrap());
-                            }
+                            % convert
+                            x @ Boolean(_) |
+                            x @ Null()              =>  Integer(self.to_int(x).unwrap());
 
                             % one way
                             List(mut a), List(b)    =>  List({
@@ -322,6 +348,23 @@ impl Interpreter {
                             Float(a),   Float(b)    =>  Float(a - b);
                             Integer(a), Float(b)    =>  Float(a as f64 - b);
                             Float(a),   Integer(b)  =>  Float(a - b as f64);
+                        }
+
+                        "*" {
+                            % convert
+                            x @ Boolean(_) |
+                            x @ Null()              =>  Integer(self.to_int(x).unwrap());
+
+                            % one way
+                            List(a),    List(b)     =>  List(a.into_iter().chain(b.into_iter()).unique().collect());
+
+                            % both ways
+                            // List(a),    Integer(b)  =>  TODO;
+                            // String(a),  Integer(b)  =>  TODO;
+                            // List(a),    Float(b)    =>  TODO;
+                            // String(a),  Float(b)    =>  TODO;
+
+                            Integer(a), Float(b)    =>  Float(a as f64 * b);
                         }
                     }
                 }
@@ -383,8 +426,8 @@ impl Interpreter {
                 Instruction::Print(ref mode) => {
                     use PrintMode::*;
 
-                    let value = &self.memory[*self.stack.last().unwrap()];
-                    match &value.data {
+                    let id = *self.stack.last().unwrap();
+                    match &self.memory[id].data {
                         ValueType::List(list) => {
                             match mode {
                                 Default | NoNewline       => print!("{}", self.join_list(list, "")),
@@ -392,7 +435,7 @@ impl Interpreter {
                             }
                         }
                         _ => {
-                            let value = value.to_string(&self.memory);
+                            let value = self.to_string(id);
                             match mode {
                                 Default | NoNewline       => print!("{}", value),
                                 Spaces  | NoNewlineSpaces => print!("{}", value.chars().intersperse(' ').collect::<String>()),
