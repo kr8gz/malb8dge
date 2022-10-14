@@ -402,17 +402,12 @@ impl Lexer {
         }
 
         self.push(match number.parse() {
-            Ok(n) => TokenType::Integer(n),
-            Err(_) => {
-                match number.parse() {
-                    Ok(n) => TokenType::Float(n),
-                    Err(_) => return Err(
-                        Error::err("wtf error")
-                            .label(self.token_start..self.actual_pos, "what did you do")
-                            .help("stop")
-                    )
-                }
-            }
+            Ok(n) => TokenType::Number(n),
+            Err(_) => return Err(
+                Error::err("wtf error")
+                    .label(self.token_start..self.actual_pos, "what did you do")
+                    .help("stop")
+            )
         });
         Ok(())
     }

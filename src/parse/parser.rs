@@ -1,6 +1,6 @@
 use std::fmt;
 
-use ariadne::{Fmt, Color};
+use ariadne::{Fmt, Color::*};
 
 use crate::{parse::ast::*, util::{*, errors::*, operators::{self, *, OpType::*}}, lex::{lexer::*, tokens::*}};
 
@@ -39,9 +39,9 @@ impl Parser {
     }
 
     // ------------------------------- error helper methods -------------------------------
-    fn expected<E: fmt::Display, F: fmt::Display>(&self, pos: Pos, expected: E, found: F) -> Error {
+    fn expected(&self, pos: Pos, expected: impl fmt::Display, found: impl fmt::Display) -> Error {
         Error::err("Syntax error")
-            .label(pos, format!("Expected {}, found {}", expected.fg(Color::Green), found.fg(Color::Red)))
+            .label(pos, format!("Expected {}, found {}", expected.fg(Green), found.fg(Red)))
     }
 
     fn expected_bracket(&mut self, open_pos: Pos, bracket: &str, has_value: bool) -> Result<()> {
@@ -52,9 +52,9 @@ impl Parser {
                     .label(open_pos, "Opening bracket here")
                     .label(next.pos, format!(
                         "Expected {} or '{}', found {}",
-                        if has_value { "value separator" } else { "value" }.fg(Color::Green),
-                                                                    bracket.fg(Color::Green),
-                                                                next.value.fg(Color::Red),
+                        if has_value { "value separator" } else { "value" }.fg(Green),
+                                                                    bracket.fg(Green),
+                                                                next.value.fg(Red),
                     ))
             )
         }
@@ -65,7 +65,7 @@ impl Parser {
         let next = self.next();
         if !next.value.is("\n") && !next.value.is(";") && !next.value.eof() {
             return Err(
-                self.expected(next.pos, "statement terminator".fg(Color::Green), next.value.fg(Color::Red))
+                self.expected(next.pos, "statement terminator".fg(Green), next.value.fg(Red))
             )
         }
         Ok(())
@@ -88,7 +88,7 @@ impl Parser {
             _ => return Err(
                 Error::err("Syntax error")
                     .label(self.curr().pos, format!("Found {found} here"))
-                    .label(node.pos, format!("Expected {}, found {}", expected.fg(Color::Green), node.data.fg(Color::Red)))
+                    .label(node.pos, format!("Expected {}, found {}", expected.fg(Green), node.data.fg(Red)))
             )
         };
         Ok(node)
@@ -216,7 +216,7 @@ impl Parser {
         }
 
         let data = match value {
-            TokenType::Integer(int) => {
+            TokenType::Number(num) => {
                 let peek = self.peek().value;
                 if
                     peek.is("(") || peek.is("[") || peek.is("{") ||
@@ -226,7 +226,7 @@ impl Parser {
                     NodeType::Group(Box::new(Node {
                         data: NodeType::BinOp {
                             a: Box::new(Node {
-                                data: NodeType::Integer(int),
+                                data: NodeType::Number(num),
                                 pos: pos.clone(),
                             }),
                             op: op_id(Binary, "*"),
@@ -235,11 +235,9 @@ impl Parser {
                         pos: pos.start..self.pos_end(),
                     }))
                 } else {
-                    NodeType::Integer(int)
+                    NodeType::Number(num)
                 }
             },
-
-            TokenType::Float(float) => NodeType::Float(float),
 
             TokenType::Identifier(id) => {
                 match id.as_str() {
@@ -323,22 +321,22 @@ impl Parser {
                     prompt: Box::new(None),
                 },
 
-                op @ ("++" | "--") => {
-                    let verb = match sym.as_str() {
-                        "++" => "increment",
-                        "--" => "decrement",
+                "++" | "--" => {
+                    let (verb, mode) = match sym.as_str() {
+                        "++" => ("increment", IncrMode::AddBef),
+                        "--" => ("decrement", IncrMode::SubBef),
                         _ => unreachable!()
                     };
 
-                    NodeType::UnaryOp {
-                        op: operators::op_id(Before, op),
+                    NodeType::Increment {
+                        mode,
                         target: {
                             let val = self.parse_value(false)?.unwrap();
                             if !matches!(val.data, NodeType::Variable(_) | NodeType::Index { .. } ) {
                                 return Err(
                                     Error::err("Syntax error")
                                         .label(pos, format!("Found {verb} operator here"))
-                                        .label(val.pos, format!("Expected {}, found {}", "variable".fg(Color::Green), val.data.fg(Color::Red)))
+                                        .label(val.pos, format!("Expected {}, found {}", "variable".fg(Green), val.data.fg(Red)))
                                         .note(format!("Only variables can be {verb}ed"))
                                 )
                             }
@@ -929,21 +927,21 @@ impl Parser {
 
                     ":" if !self.stop.contains(&":") => self.parse_fn_def(vec![parsed_value])?,
 
-                    op @ ("++" | "--") => {
-                        let verb = match sym.as_str() {
-                            "++" => "increment",
-                            "--" => "decrement",
+                    "++" | "--" => {
+                        let (verb, mode) = match sym.as_str() {
+                            "++" => ("increment", IncrMode::AddAft),
+                            "--" => ("decrement", IncrMode::SubAft),
                             _ => unreachable!()
                         };
-
-                        NodeType::UnaryOp {
-                            op: operators::op_id(After, op),
+    
+                        NodeType::Increment {
+                            mode,
                             target: {
                                 if !matches!(parsed_value.data, NodeType::Variable(_) | NodeType::Index { .. } ) {
                                     return Err(
                                         Error::err("Syntax error")
                                             .label(pos, format!("Found {verb} operator here"))
-                                            .label(parsed_value.pos, format!("Expected {}, found {}", "variable".fg(Color::Green), parsed_value.data.fg(Color::Red)))
+                                            .label(parsed_value.pos, format!("Expected {}, found {}", "variable".fg(Green), parsed_value.data.fg(Red)))
                                             .note(format!("Only variables can be {verb}ed"))
                                     )
                                 }

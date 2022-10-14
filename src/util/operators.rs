@@ -17,7 +17,7 @@ pub enum OpType {
 macro_rules! operators {
     (
         $( $type:ident: $( $op:literal ),+, )*
-        [no precedence]
+        % no precedence
         $( $type_n:ident: $( $op_n:literal ),+, )*
     ) => {
         const PREC_LIST: &[PrecType] = &[ $( PrecType::$type, )* ];
@@ -105,8 +105,8 @@ operators! {
 
     Before:     "@", "^^", "#", "'",
 
-    [no precedence]
-    Before:     "++", "--", ";", "/", "|", "/|",
-    After:      "++", "--", "^^", "##", "#\\", "#$", "_", "``", "$$", "$", "'", "`",
-    Other:      "%%",
+    % no precedence
+    Before:     ";", "/", "|", "/|",
+    After:      "^^", "##", "#\\", "#$", "_", "``", "$$", "$", "'", "`",
+    Other:      "%%", "++", "--",
 }

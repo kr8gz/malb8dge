@@ -59,11 +59,11 @@ pub struct Error {
 }
 
 impl Error {
-    pub fn err<T: ToString>(msg: T) -> Self {
+    pub fn err(msg: impl ToString) -> Self {
         Error::new(msg, ReportKind::Error)
     }
 
-    fn new<T: ToString>(msg: T, kind: ReportKind) -> Self {
+    fn new(msg: impl ToString, kind: ReportKind) -> Self {
         Self {
             msg: msg.to_string(),
             kind,
@@ -74,18 +74,18 @@ impl Error {
         }
     }
 
-    pub fn label<T: Into<String>>(mut self, pos: Pos, msg: T) -> Self {
-        self.labels.push((pos, msg.into()));
+    pub fn label(mut self, pos: Pos, msg: impl ToString) -> Self {
+        self.labels.push((pos, msg.to_string()));
         self
     }
 
-    pub fn help<T: Into<String>>(mut self, msg: T) -> Self {
-        self.help = Some(msg.into());
+    pub fn help(mut self, msg: impl ToString) -> Self {
+        self.help = Some(msg.to_string());
         self
     }
 
-    pub fn note<T: Into<String>>(mut self, msg: T) -> Self {
-        self.note = Some(msg.into());
+    pub fn note(mut self, msg: impl ToString) -> Self {
+        self.note = Some(msg.to_string());
         self
     }
 

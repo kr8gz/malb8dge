@@ -1,4 +1,38 @@
+use std::ops::{Index, IndexMut};
+
 use crate::{compile::instructions::*, util::Pos};
+
+#[derive(Debug)]
+pub struct Stack(pub Vec<Value>);
+
+impl Stack {
+    pub fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    pub fn push(&mut self, value: Value) -> usize {
+        match self.0.iter().position(|v| !matches!(v.data, ValueType::List(_)) && v.data == value.data) {
+            Some(id) => id,
+            None => {
+                self.0.push(value);
+                self.0.len() - 1
+            }
+        }
+    }
+}
+
+impl Index<usize> for Stack {
+    type Output = Value;
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
+    }
+}
+
+impl IndexMut<usize> for Stack {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.0[index]
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Value {
@@ -35,8 +69,7 @@ types! {
     Function(Function),
     List(Vec<usize>),
     String(String),
-    Integer(i64),
-    Float(f64),
+    Number(f64),
     Boolean(bool),
     Null(),
 }

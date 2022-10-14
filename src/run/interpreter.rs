@@ -2,9 +2,11 @@
 
 use std::{io::{self, Write}, process};
 
+use ariadne::{Fmt, Color::*};
+
 use itertools::Itertools;
 
-use crate::{compile::{compiler::Compiler, instructions::*}, util::{errors::{self, Error}, Pos, operators}, parse::ast::*};
+use crate::{compile::{compiler::Compiler, instructions::*}, util::{*, errors::{self, Error}, Pos, operators}, parse::ast::*};
 
 use super::types::*;
 
@@ -19,7 +21,7 @@ pub struct Interpreter {
 }
 
 impl Interpreter {
-    pub fn run(compiler: Compiler) -> Result<(), Error> {
+    pub fn run(compiler: Compiler) -> Result<()> {
         Self {
             constants: compiler.constants.0,
             functions: compiler.functions,
@@ -31,15 +33,14 @@ impl Interpreter {
         }.run_func(0)
     }
 
-    fn to_int(&self, value: &ValueType) -> Option<i64> {
+    fn to_int(&self, value: &ValueType) -> Option<f64> {
         use ValueType::*;
         match value {
-            List(list) => Some(list.len() as i64),
-            String(s)      => s.parse().ok(),
-            Integer(int)      => Some(*int),
-            Float(float)      => Some(*float as i64),
-            Boolean(true)           => Some(1),
-            Boolean(false) | Null() => Some(0),
+            List(list) => Some(list.len() as f64),
+            String(s) => s.parse().ok(),
+            Number(num) => Some(*num),
+            Boolean(true) => Some(1.0),
+            Boolean(false) | Null() => Some(0.0),
             _ => None
         }
     }
@@ -53,8 +54,7 @@ impl Interpreter {
             },
             Boolean(b) => b.to_string(),
             String(s) => s.clone(),
-            Integer(int) => int.to_string(),
-            Float(float) => float.to_string(),
+            Number(num) => num.to_string(),
             Null() => "".into(),
         }
     }
@@ -74,7 +74,7 @@ impl Interpreter {
             .join(sep)
     }
 
-    fn run_func(&mut self, func: usize) -> Result<(), Error> {
+    fn run_func(&mut self, func: usize) -> Result<()> {
         let instructions = &self.functions[func].instructions;
         let mut instr_pos = 0;
 
@@ -84,8 +84,10 @@ impl Interpreter {
             macro_rules! push {
                 ( Value, $value:expr ) => {
                     {
-                        let id = self.memory.push($value);
-                        self.stack.push(id)
+                        let value = $value; // most confusing error ever lmao
+                        let id = self.memory.push(value);
+                        self.stack.push(id);
+                        id
                     }
                 };
 
@@ -125,6 +127,8 @@ impl Interpreter {
                 }
 
                 Instruction::StoreIndex => {
+                    let value_id = pop!(Id);
+
                     let index = pop!(Value);
                     let mut i = match self.to_int(&index.data) {
                         Some(i) => i,
@@ -141,11 +145,11 @@ impl Interpreter {
                     macro_rules! index {
                         ( $len:expr ) => {
                             {
-                                let len = $len as i64;
-                                if i < 0 {
+                                let len = $len as f64;
+                                if i < 0.0 {
                                     i += len;
                                 }
-                                if i < 0 || i >= len {
+                                if i < 0.0 || i >= len {
                                     return Err(
                                         Error::err("Index out of bounds")
                                             .label(target.pos.clone(), format!("Length of this is {len}"))
@@ -160,25 +164,24 @@ impl Interpreter {
                     match &mut target.data {
                         ValueType::List(list) => {
                             let index = index!(list.len());
-                            list[index as usize] = pop!(Id);
+                            list[index as usize] = value_id;
                         }
 
                         ValueType::String(s) => {
                             let index = index!(s.len());
-                            let value_id = pop!(Id);
                             s.replace_range(
                                 s
                                     .char_indices()
                                     .nth(index as usize)
                                     .map(|(pos, ch)| pos..pos + ch.len_utf8())
                                     .unwrap(),
-                                    &self.to_string(value_id),
+                                &self.to_string(value_id),
                             );
                         }
 
                         _ => return Err(
                             Error::err("Type error")
-                            .label(instr.pos.clone(), "Expected a list to index")
+                            .label(instr.pos.clone(), "Expected a list to assign to")
                             .label(target.pos.clone(), "Cannot convert this to a list")
                         )
                     };
@@ -202,9 +205,13 @@ impl Interpreter {
                 Instruction::BinaryOp(op_id) => {
                     let mut b_id = pop!(Id);
                     let mut rhs = self.memory[b_id].clone();
+                    let rhs_type = rhs.type_name();
 
                     let mut a_id = pop!(Id);
                     let mut lhs = self.memory[a_id].clone();
+                    let lhs_type = lhs.type_name();
+
+                    let op = operators::id_sym(op_id);
 
                     macro_rules! bin_ops {
                         (
@@ -227,18 +234,13 @@ impl Interpreter {
                             )*
                         ) => {
                             use ValueType::*;
-
-                            let op = operators::id_sym(op_id);
                             
                             let err = Error::err("Type error")
-                            .label(lhs.pos.clone(), format!("This has type '{}'", lhs.type_name()))
-                            .label(rhs.pos.clone(), format!("This has type '{}'", rhs.type_name()))
+                            .label(lhs.pos.clone(), format!("This has type '{lhs_type}'"))
+                            .label(rhs.pos.clone(), format!("This has type '{rhs_type}'"))
                             .label(
                                 instr.pos.clone(),
-                                format!(
-                                    "Binary '{op}' is not implemented for types '{}' and '{}'",
-                                    lhs.type_name(), rhs.type_name(),
-                                )
+                                format!("Binary '{op}' is not implemented for types '{lhs_type}' and '{rhs_type}'")
                             );
 
                             match op {
@@ -284,33 +286,31 @@ impl Interpreter {
                             };
                         }
                     }
+
+                    macro_rules! set_helper {
+                        ( $a:ident, $b:ident ) => { $a.iter().chain($b.iter()).unique().copied() }
+                    }
                     
                     // basically writing std lmao
                     bin_ops! {
                         "+" {
                             % convert
-                            x @ Boolean(_) |
-                            x @ Null()              =>  Integer(self.to_int(x).unwrap());
+                            x @ (Boolean(_) | Null()) => Number(self.to_int(x).unwrap());
 
                             % one way
+                            Number(a),  Number(b)   =>  Number(a + b);
                             List(a),    List(b)     =>  List(a.into_iter().chain(b.into_iter()).collect());
                             String(a),  String(b)   =>  String(a + &b);
                             String(a),  List(b)     =>  String(a + &self.join_list(&b, ""));
 
-                            Integer(a), Integer(b)  =>  Integer(a + b);
-                            Float(a),   Float(b)    =>  Float(a + b);
-
                             % both ways
                             List(a),    _           =>  List(a.into_iter().chain([b_id]).collect());
                             String(a),  _           =>  String(a + &self.to_string(b_id));
-
-                            Integer(a), Float(b)    =>  Float(a as f64 + b);
                         }
 
                         "-" {
                             % convert
-                            x @ Boolean(_) |
-                            x @ Null()              =>  Integer(self.to_int(x).unwrap());
+                            x @ (Boolean(_) | Null()) => Number(self.to_int(x).unwrap());
 
                             % one way
                             List(mut a), List(b)    =>  List({
@@ -334,37 +334,78 @@ impl Interpreter {
                                                                 return Err(
                                                                     Error::err("Value error")
                                                                         .label(instr.pos.clone(), "Expected strings of length 1 for character range")
-                                                                        .label(lhs.pos, format!("This string has length {}", a.len()))
-                                                                        .label(rhs.pos, format!("This string has length {}", b.len()))
+                                                                        .label(lhs.pos, format!(
+                                                                            "This string has length {}",
+                                                                            a.len().fg(if a.len() == 1 { Green } else { Red }),
+                                                                        ))
+                                                                        .label(rhs.pos, format!(
+                                                                            "This string has length {}",
+                                                                            b.len().fg(if b.len() == 1 { Green } else { Red }),
+                                                                        ))
                                                                 )
                                                             }
                                                             (a.chars().next().unwrap()..b.chars().next().unwrap()).collect()
                                                         });
 
-                            String(a),  Integer(b)  =>  String(a.chars().dropping_back(b as usize).collect());
-                            String(a),  Float(b)    =>  String(a.chars().dropping_back(b as usize).collect());
+                            String(a),  Number(b)   =>  String(a.chars().dropping_back({
+                                                            if b >= 0.0 {
+                                                                b as usize
+                                                            } else {
+                                                                return Err(
+                                                                    Error::err("Value error")
+                                                                        .label(
+                                                                            instr.pos.clone(),
+                                                                            format!(
+                                                                                "Expected {} for right side of {lhs_type} {op} {rhs_type}",
+                                                                                "number >= 0".fg(Green),
+                                                                            ),
+                                                                        )
+                                                                        .label(rhs.pos, format!("{} is not {}", b.fg(Red), ">= 0".fg(Green)))
+                                                                )
+                                                            }
+                                                        }).collect());
 
-                            Integer(a), Integer(b)  =>  Integer(a - b);
-                            Float(a),   Float(b)    =>  Float(a - b);
-                            Integer(a), Float(b)    =>  Float(a as f64 - b);
-                            Float(a),   Integer(b)  =>  Float(a - b as f64);
+                            Number(a),  Number(b)   =>  Number(a - b);
                         }
 
                         "*" {
                             % convert
-                            x @ Boolean(_) |
-                            x @ Null()              =>  Integer(self.to_int(x).unwrap());
+                            x @ (Boolean(_) | Null()) => Number(self.to_int(x).unwrap());
 
                             % one way
-                            List(a),    List(b)     =>  List(a.into_iter().chain(b.into_iter()).unique().collect());
+                            Number(a),  Number(b)   =>  Number(a * b);
+                            List(a),    List(b)     =>  List(set_helper!(a, b).filter(|id| a.contains(id) && b.contains(id)).collect());
 
                             % both ways
-                            // List(a),    Integer(b)  =>  TODO;
-                            // String(a),  Integer(b)  =>  TODO;
-                            // List(a),    Float(b)    =>  TODO;
-                            // String(a),  Float(b)    =>  TODO;
+                            List(a),    Number(b)   =>  List({
+                                                            let mut res = Vec::new();
+                                                            for _ in 0..b.abs() as usize {
+                                                                res.extend(a.iter().map(|&id| {
+                                                                    if let ValueType::List(list) = &self.memory[id].data {
+                                                                        push!(List, list.clone()) // 3 * [3 * [x]]
+                                                                    } else {
+                                                                        id
+                                                                    }
+                                                                }));
+                                                            }
+                                                            if b < 0.0 { res.reverse(); }
+                                                            res
+                                                        });
+                            
+                            String(mut a), Number(b) => String({
+                                                            a = a.repeat(b.abs() as usize);
+                                                            if b < 0.0 { a = a.chars().rev().collect(); }
+                                                            a
+                                                        });
+                        }
 
-                            Integer(a), Float(b)    =>  Float(a as f64 * b);
+                        "/" {
+                            % convert
+                            x @ (Boolean(_) | Null()) => Number(self.to_int(x).unwrap());
+
+                            % one way
+                            Number(a),  Number(b)   =>  Number(a / b);
+                            List(a),    List(b)     =>  List(set_helper!(a, b).filter(|id| a.contains(id) != b.contains(id)).collect());
                         }
                     }
                 }
@@ -378,11 +419,11 @@ impl Interpreter {
                             macro_rules! index {
                                 ( $len:expr ) => {
                                     {
-                                        let len = $len as i64;
-                                        if i < 0 {
+                                        let len = $len as f64;
+                                        if i < 0.0 {
                                             i += len;
                                         }
-                                        if i < 0 || i >= len {
+                                        if i < 0.0 || i >= len {
                                             return Err(
                                                 Error::err("Index out of bounds")
                                                     .label(target.pos.clone(), format!("Length of this is {len}"))
@@ -403,8 +444,8 @@ impl Interpreter {
                                     push!(String, s.chars().nth(index!(s.len()) as usize).unwrap().to_string());
                                 }
 
-                                ValueType::Integer(int) => {
-                                    push!(Integer, index!(*int));
+                                ValueType::Number(num) => {
+                                    push!(Number, index!(*num));
                                 }
 
                                 _ => return Err(
@@ -475,6 +516,11 @@ impl Interpreter {
 
                 Instruction::RotThree => {
                     let last_three = self.stack.len() - 3;
+                    self.stack[last_three..].rotate_right(1);
+                }
+
+                Instruction::RotFour => {
+                    let last_three = self.stack.len() - 4;
                     self.stack[last_three..].rotate_right(1);
                 }
             

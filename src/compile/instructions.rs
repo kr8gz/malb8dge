@@ -1,50 +1,15 @@
-use std::{collections::HashMap, ops::{Index, IndexMut}};
+use std::collections::HashMap;
 
-use crate::{parse::ast::PrintMode, util::Pos, run::types::Value};
-
-type Id = usize;
-type Len = usize;
-
-#[derive(Debug)]
-pub struct Stack(pub Vec<Value>);
-
-impl Stack {
-    pub fn new() -> Self {
-        Self(Vec::new())
-    }
-
-    pub fn push(&mut self, value: Value) -> Id {
-        match self.0.iter().position(|v| v.data == value.data) {
-            Some(id) => id,
-            None => {
-                self.0.push(value);
-                self.0.len() - 1
-            }
-        }
-    }
-}
-
-impl Index<usize> for Stack {
-    type Output = Value;
-    fn index(&self, index: usize) -> &Self::Output {
-        &self.0[index]
-    }
-}
-
-impl IndexMut<usize> for Stack {
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        &mut self.0[index]
-    }
-}
+use crate::{parse::ast::PrintMode, util::Pos};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Function {
     pub instructions: Vec<InstrData>,
-    pub args: Vec<Id>,
+    pub args: Vec<usize>,
 }
 
 impl Function {
-    pub fn new(args: Vec<Id>) -> Self {
+    pub fn new(args: Vec<usize>) -> Self {
         Self { instructions: Vec::new(), args }
     }
 }
@@ -58,15 +23,15 @@ pub struct Scope {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Instruction {
-    LoadConst(Id),
-    LoadVar(Id),
-    StoreVar(Id), // pop and store
-    StoreIndex, // s1.s0 = s2 // pop all 3
+    LoadConst(usize),
+    LoadVar(usize),
+    StoreVar(usize), // pop and store
+    StoreIndex, // s2.s1 = s0 // pop all 3
     
-    BuildList(Len),
+    BuildList(usize),
 
-    UnaryOp(Id),
-    BinaryOp(Id), // s1 X s0
+    UnaryOp(usize),
+    BinaryOp(usize), // s1 X s0
     BinaryIndex, // s1.s0
 
     Print(PrintMode),
@@ -76,6 +41,7 @@ pub enum Instruction {
     DupOne,
     DupTwo,
     RotThree, // top goes 2 back
+    RotFour,
 
     Exit,
 }

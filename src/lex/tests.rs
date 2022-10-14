@@ -50,7 +50,7 @@ token_test! {
     
     "01234567890"
 
-    TokenType::Integer(1234567890), 0..11
+    TokenType::Number(1234567890.0), 0..11
 }
 
 token_test! {
@@ -58,7 +58,7 @@ token_test! {
 
     "012345.67890"
 
-    TokenType::Float(12345.6789), 0..12
+    TokenType::Number(12345.6789), 0..12
 }
 
 token_test! {
@@ -96,7 +96,7 @@ token_test! {
 
     TokenType::Identifier("a".into()),  0..1
     TokenType::Symbol("+=".into()),     2..4
-    TokenType::Integer(3),              5..6
+    TokenType::Number(3.0),             5..6
 }
 
 token_test! {
@@ -123,13 +123,13 @@ token_test! {
 
     TokenType::Identifier("list".into()),   0..4
     TokenType::Symbol(".".into()),          4..5
-    TokenType::Integer(0),                  5..6
+    TokenType::Number(0.0),                 5..6
     TokenType::Symbol(".".into()),          6..7
-    TokenType::Integer(0),                  7..8
+    TokenType::Number(0.0),                 7..8
 
     TokenType::Symbol("+".into()),          9..10
 
-    TokenType::Float(0.0),                  11..14
+    TokenType::Number(0.0),                  11..14
 }
 
 token_test! {

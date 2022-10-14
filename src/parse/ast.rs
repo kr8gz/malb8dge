@@ -29,6 +29,7 @@ pub enum NodeType {
     UnaryOp { target: BNode, op: usize }, // op: usize = op id
     BinOp { a: BNode, op: usize, b: BNode },
     Compare { first: BNode, chain: Vec<(String, BNode)> },
+    Increment { target: BNode, mode: IncrMode },
     FnCall { target: BNode, args: VNode },
     Index { target: BNode, index: BNode },
     Slice { target: BNode, start: ONode, stop: ONode, step: ONode },
@@ -43,8 +44,7 @@ pub enum NodeType {
     List(VNode),
     Variable(String),
     String(Vec<ParsedFragment>),
-    Integer(i64),
-    Float(f64),
+    Number(f64),
     Boolean(bool),
     Null,
 }
@@ -64,6 +64,7 @@ impl Display for NodeType {
             Self::Loop { .. } => "loop".into(),
             Self::Function { .. } => "function definition".into(),
             Self::UnaryOp { .. } | Self::BinOp { .. } => "expression".into(),
+            Self::Increment { .. } => "incrementation".into(),
             Self::Compare { .. } => "comparison".into(),
             Self::FnCall { .. } => "function call".into(),
             Self::Index { .. } => "index".into(),
@@ -82,12 +83,26 @@ impl Display for NodeType {
                 _ => format!("variable '{var}'")
             },
             Self::String(_) => "string".into(),
-            Self::Integer(_) => "number".into(),
-            Self::Float(_) => "float".into(),
+            Self::Number(_) => "number".into(),
             Self::Boolean(b) => format!("keyword '{b}'"),
             Self::Null => "keyword 'null'".into(),
         })
     }
+}
+
+#[derive(Debug)]
+pub enum IncrMode {
+    AddBef,
+    AddAft,
+    SubBef,
+    SubAft,
+}
+
+impl IncrMode {
+    pub fn add(&self) -> bool { matches!(self, Self::AddBef | Self::AddAft) }
+    pub fn sub(&self) -> bool { matches!(self, Self::SubBef | Self::SubAft) }
+    pub fn bef(&self) -> bool { matches!(self, Self::AddBef | Self::SubBef) }
+    pub fn aft(&self) -> bool { matches!(self, Self::AddAft | Self::SubAft) }
 }
 
 macro_rules! enum_modes {
