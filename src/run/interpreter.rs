@@ -37,8 +37,8 @@ impl Interpreter {
         use ValueType::*;
         match value {
             List(list) => Some(list.len() as f64),
-            String(s) => s.parse().ok(),
-            Number(num) => Some(*num),
+            String(s) => s.parse().ok().map(|n: f64| n.floor()),
+            Number(num) => Some(num.floor()),
             Boolean(true) => Some(1.0),
             Boolean(false) | Null() => Some(0.0),
             _ => None
@@ -293,6 +293,46 @@ impl Interpreter {
                     
                     // basically writing std lmao
                     bin_ops! {
+                        "||" {
+
+                        }
+
+                        "&&" {
+
+                        }
+
+                        "|" {
+
+                        }
+                        
+                        "&" {
+
+                        }
+
+                        // compare operators (would probably be a lot of copy paste so maybe theres a better solution like with PartialOrd or something)
+
+                        "-?" {
+
+                        }
+
+                        ".." {
+
+                        }
+                        
+                        // might need a Range value type
+
+                        "#" {
+
+                        }
+
+                        "?\\" {
+
+                        }
+
+                        "%" {
+                            
+                        }
+
                         "+" {
                             % convert
                             x @ (Boolean(_) | Null()) => Number(self.to_int(x).unwrap());
@@ -374,7 +414,7 @@ impl Interpreter {
 
                             % one way
                             Number(a),  Number(b)   =>  Number(a * b);
-                            List(a),    List(b)     =>  List(set_helper!(a, b).filter(|id| a.contains(id) && b.contains(id)).collect());
+                            List(a),    List(b)     =>  List(set_helper!(a, b).collect());
 
                             % both ways
                             List(a),    Number(b)   =>  List({
@@ -405,7 +445,47 @@ impl Interpreter {
 
                             % one way
                             Number(a),  Number(b)   =>  Number(a / b);
-                            List(a),    List(b)     =>  List(set_helper!(a, b).filter(|id| a.contains(id) != b.contains(id)).collect());
+                            List(a),    List(b)     =>  List(set_helper!(a, b).filter(|id| a.contains(id) && b.contains(id)).collect());
+                        }
+
+                        "//" {
+                            % convert
+                            x @ (Boolean(_) | Null()) => Number(self.to_int(x).unwrap());
+
+                            % one way
+                            Number(a),  Number(b)   =>  Number((a / b).trunc());
+                        }
+
+                        "+-" {
+                            % convert
+                            x @ (Boolean(_) | Null()) => Number(self.to_int(x).unwrap());
+
+                            % one way
+                            Number(a),  Number(b)   =>  List(vec![push!(Number, a + b), push!(Number, a - b)]);
+                        }
+
+                        "/%" {
+                            % convert
+                            x @ (Boolean(_) | Null()) => Number(self.to_int(x).unwrap());
+
+                            % one way
+                            Number(a),  Number(b)   =>  List(vec![push!(Number, a / b), push!(Number, a % b)]);
+                        }
+
+                        "^" {
+
+                        }
+
+                        ".*" {
+
+                        }
+
+                        "^*" {
+                            
+                        }
+
+                        "@" {
+
                         }
                     }
                 }

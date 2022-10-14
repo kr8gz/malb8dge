@@ -91,7 +91,7 @@ operators! {
 
     LeftAssoc:  "%",
     LeftAssoc:  "+", "-",
-    LeftAssoc:  "*", "/", "/.",
+    LeftAssoc:  "*", "/", "//",
     LeftAssoc:  "+-", "/%",
 
     Before:     "-", ".", "`", "``",

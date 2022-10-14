@@ -41,7 +41,7 @@ impl Display for TokenType {
             Self::Number(_) => "number".into(),
             Self::Symbol(sym) => match sym.as_str() {
                 "\n" => "newline".into(),
-                _ => format!("'{sym}'")
+                _ => format!("symbol '{sym}'")
             },
             Self::Eof => "end of file".into(),
         })

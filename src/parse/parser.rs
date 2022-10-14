@@ -51,10 +51,10 @@ impl Parser {
                 Error::err("Syntax error")
                     .label(open_pos, "Opening bracket here")
                     .label(next.pos, format!(
-                        "Expected {} or '{}', found {}",
+                        "Expected {} or {}, found {}",
                         if has_value { "value separator" } else { "value" }.fg(Green),
-                                                                    bracket.fg(Green),
-                                                                next.value.fg(Red),
+                        bracket.fg(Green),
+                        next.value.fg(Red),
                     ))
             )
         }
