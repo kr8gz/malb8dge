@@ -34,6 +34,18 @@ impl IndexMut<usize> for Stack {
     }
 }
 
+pub trait RemoveElement<T: PartialEq> {
+    fn remove_element(&mut self, element: &T);
+}
+
+impl<T: PartialEq> RemoveElement<T> for Vec<T> {
+    fn remove_element(&mut self, element: &T) {
+        if let Some(pos) = self.iter().position(|el| el == element) {
+            self.remove(pos);
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Value {
     pub data: ValueType,

@@ -247,12 +247,12 @@ impl Interpreter {
                             use ValueType::*;
                             
                             let err = Error::err("Type error")
-                            .label(lhs.pos.clone(), format!("This has type '{lhs_type}'"))
-                            .label(rhs.pos.clone(), format!("This has type '{rhs_type}'"))
-                            .label(
-                                instr.pos.clone(),
-                                format!("Binary '{op}' is not implemented for types '{lhs_type}' and '{rhs_type}'")
-                            );
+                                .label(lhs.pos.clone(), format!("This has type '{lhs_type}'"))
+                                .label(rhs.pos.clone(), format!("This has type '{rhs_type}'"))
+                                .label(
+                                    instr.pos.clone(),
+                                    format!("Binary '{op}' is not implemented for types '{lhs_type}' and '{rhs_type}'")
+                                );
 
                             match op {
                                 $(
@@ -377,27 +377,19 @@ impl Interpreter {
                             x @ (Boolean(_) | Null()) => Number(self.to_int(x).unwrap());
 
                             % one way
-                            List(mut a), List(b)    =>  List({
-                                                            for b_id in b {
-                                                                if let Some(pos) = a.iter().position(|id| *id == b_id) {
-                                                                    a.remove(pos);
-                                                                }
-                                                            }
-                                                            a
-                                                        });
-
-                            List(mut a), _          =>  List({
-                                                            if let Some(pos) = a.iter().position(|id| *id == b_id) {
-                                                                a.remove(pos);
-                                                            }
-                                                            a
-                                                        });
+                            List(mut a), List(b)    =>  List({ for b_id in b { a.remove_element(&b_id); }; a });
+                            List(mut a), _          =>  List({                 a.remove_element(&b_id);    a });
 
                             String(a),  String(b)   =>  String({
-                                                            if a.len() != 1 || b.len() != 1 {
+                                                            if a.len() == 1 || b.len() == 1 {
+                                                                (a.chars().next().unwrap()..b.chars().next().unwrap()).collect()
+                                                            } else {
                                                                 return Err(
                                                                     Error::err("Value error")
-                                                                        .label(instr.pos.clone(), "Expected strings of length 1 for character range")
+                                                                        .label(instr.pos.clone(), format!(
+                                                                            "Expected strings of {} for character range",
+                                                                            "length 1".fg(Green),
+                                                                        ))
                                                                         .label(lhs.pos, format!(
                                                                             "This string has length {}",
                                                                             a.len().fg(if a.len() == 1 { Green } else { Red }),
@@ -408,12 +400,11 @@ impl Interpreter {
                                                                         ))
                                                                 )
                                                             }
-                                                            (a.chars().next().unwrap()..b.chars().next().unwrap()).collect()
                                                         });
 
-                            String(a),  Number(b)   =>  String(a.chars().dropping_back({
+                            String(a),  Number(b)   =>  String({
                                                             if b >= 0.0 {
-                                                                b as usize
+                                                                a.chars().dropping_back(b as usize).collect()
                                                             } else {
                                                                 return Err(
                                                                     Error::err("Value error")
@@ -427,7 +418,7 @@ impl Interpreter {
                                                                         .label(rhs.pos, format!("{} is not {}", b.fg(Red), ">= 0".fg(Green)))
                                                                 )
                                                             }
-                                                        }).collect());
+                                                        });
 
                             Number(a),  Number(b)   =>  Number(a - b);
                         }
@@ -497,7 +488,15 @@ impl Interpreter {
                         }
 
                         "^" {
+                            % convert
+                            x @ (Boolean(_) | Null()) => Number(self.to_int(x).unwrap());
 
+                            % one way
+                            Number(a),  Number(b)   =>  Number(a.powf(b));
+                            List(a),    List(b)     =>  List(set_helper!(a, b).filter(|id| a.contains(id) != b.contains(id)).collect());
+                            
+                            List(a),    String(b)   =>  String(a.into_iter().map(|id| self.to_string(id)).join(&b));
+                            String(a),  String(b)   =>  String(a.chars().map(|c| c.to_string()).intersperse(b).collect());
                         }
 
                         ".*" {
