@@ -1,4 +1,4 @@
-#![allow(unstable_name_collisions)]
+#![allow(unstable_name_collisions)] // i just want to use intersperse
 
 use std::{io::{self, Write}, process};
 
@@ -37,11 +37,22 @@ impl Interpreter {
         use ValueType::*;
         match value {
             List(list) => Some(list.len() as f64),
-            String(s) => s.parse().ok().map(|n: f64| n.floor()),
+            String(s) => s.parse::<f64>().ok().map(|n| n.floor()),
             Number(num) => Some(num.floor()),
             Boolean(true) => Some(1.0),
             Boolean(false) | Null() => Some(0.0),
             _ => None
+        }
+    }
+
+    fn to_bool(&self, value: &ValueType) -> bool {
+        use ValueType::*;
+        match value {
+            List(list) => !list.is_empty(),
+            String(s) => !s.is_empty(),
+            Number(num) => *num != 0.0,
+            Boolean(_) | Function(_) => true,
+            Null() => false,
         }
     }
 
@@ -224,11 +235,11 @@ impl Interpreter {
                                     )?
                                     $(
                                         % one way
-                                        $( $a1:pat, $b1:pat => $ret1:ident($($expr1:expr)?); )+
+                                        $( $a1:pat, $b1:pat => $expr1:expr; )+
                                     )?
                                     $(
                                         % both ways
-                                        $( $a2:pat, $b2:pat => $ret2:ident($($expr2:expr)?); )+
+                                        $( $a2:pat, $b2:pat => $expr2:expr; )+
                                     )?
                                 }
                             )*
@@ -261,23 +272,24 @@ impl Interpreter {
                                             $(
                                                 $(
                                                     ( $a1, $b1 ) => {
-                                                        push!($ret1 $(, $expr1)?);
+                                                        push!(Value, $expr1.into_value(&instr.pos));
                                                     }
                                                 )+
                                             )?
                                             $(
                                                 $(
                                                     ( $a2, $b2 ) => {
-                                                        push!($ret2 $(, $expr2)?);
+                                                        push!(Value, $expr2.into_value(&instr.pos));
                                                     }
                                                     
                                                     #[allow(unused_assignments)] // they can be used in the op implementations
                                                     ( $b2, $a2 ) => {
                                                         (a_id, b_id) = (b_id, a_id);
-                                                        push!($ret2 $(, $expr2)?);
+                                                        push!(Value, $expr2.into_value(&instr.pos));
                                                     }
                                                 )+
                                             )?
+                                            #[allow(unreachable_patterns)] // not every operator matches all types
                                             _ => return Err(err)
                                         }
                                     }
@@ -294,25 +306,29 @@ impl Interpreter {
                     // basically writing std lmao
                     bin_ops! {
                         "||" {
-
+                            % one way
+                            a, b => Boolean(self.to_bool(&a) || self.to_bool(&b));
                         }
 
                         "&&" {
-
+                            % one way
+                            a, b => Boolean(self.to_bool(&a) && self.to_bool(&b));
                         }
 
                         "|" {
-
+                            % one way
+                            a, b => if self.to_bool(&a) { a } else { b };
                         }
                         
                         "&" {
-
+                            % one way
+                            a, b => if self.to_bool(&a) { b } else { a };
                         }
 
                         // compare operators (would probably be a lot of copy paste so maybe theres a better solution like with PartialOrd or something)
 
                         "-?" {
-
+                            // something with 1 and -1 lol
                         }
 
                         ".." {
@@ -326,11 +342,19 @@ impl Interpreter {
                         }
 
                         "?\\" {
+                            % convert
+                            x @ (Boolean(_) | Null()) => Number(self.to_int(x).unwrap());
 
+                            // % one way
+                            // Number(a),  Number(b)   =>  Number( random number from a to b ); // what about floats
                         }
 
                         "%" {
-                            
+                            % convert
+                            x @ (Boolean(_) | Null()) => Number(self.to_int(x).unwrap());
+
+                            % one way
+                            Number(a),  Number(b)   =>  Number(a % b);
                         }
 
                         "+" {
