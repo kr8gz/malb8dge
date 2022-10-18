@@ -144,13 +144,8 @@ impl Interpreter {
             }
 
             macro_rules! unwrap_type_err {
-                (
-                    value: $value:expr,
-                    expr: $expr:expr,
-                    expected: $expected:literal,
-                    for: $for:literal
-                ) => {
-                    match $expr {
+                ( $value:expr => $func:ident; expected $expected:literal for $for:literal ) => {
+                    match self.$func(&$value.data) {
                         Some(x) => x,
                         None => return Err(
                             Error::err("Type error")
@@ -235,7 +230,7 @@ impl Interpreter {
                     let value_id = pop!(Id);
 
                     let index = pop!(Value);
-                    let mut i = unwrap_type_err!(value: index, expr: self.to_int(&index.data), expected: "an integer", for: "list index");
+                    let mut i = unwrap_type_err!(index => to_int; expected "an integer" for "list index");
 
                     let target_id = pop!(Id);
                     let mut target = self.memory[target_id].clone();
@@ -311,7 +306,7 @@ impl Interpreter {
 
                         "^" {
                             a => List({
-                                let i = unwrap_type_err!(value: self.memory[target_id], expr: self.to_int(&a), expected: "an integer", for: "^x") as i64;
+                                let i = unwrap_type_err!(self.memory[target_id] => to_int; expected "an integer" for "^x") as i64;
                                 if i < 0 { i..0 } else { 0..i }.map(|i| push!(Number, i as f64)).collect()
                             });
                         }
@@ -321,7 +316,7 @@ impl Interpreter {
                         }
 
                         "-" {
-                            a => Number(-unwrap_type_err!(value: self.memory[target_id], expr: self.to_num(&a), expected: "a number", for: "-x"));
+                            a => Number(-unwrap_type_err!(self.memory[target_id] => to_num; expected "a number" for "-x"));
                         }
 
                         "." {
@@ -712,7 +707,7 @@ impl Interpreter {
 
                 Instruction::BinaryIndex => {
                     let index = pop!(Value);
-                    let mut i = unwrap_type_err!(value: index, expr: self.to_int(&index.data), expected: "an integer", for: "list index");
+                    let mut i = unwrap_type_err!(index => to_int; expected "an integer" for "list index");
 
                     let target = pop!(Value);
 

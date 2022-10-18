@@ -101,7 +101,7 @@ pub enum IncrMode {
 
 impl IncrMode {
     pub fn add(&self) -> bool { matches!(self, Self::AddBef | Self::AddAft) }
-    pub fn sub(&self) -> bool { matches!(self, Self::SubBef | Self::SubAft) }
+    // pub fn sub(&self) -> bool { matches!(self, Self::SubBef | Self::SubAft) }
     pub fn bef(&self) -> bool { matches!(self, Self::AddBef | Self::SubBef) }
     pub fn aft(&self) -> bool { matches!(self, Self::AddAft | Self::SubAft) }
 }
