@@ -30,7 +30,8 @@ pub enum Instruction {
     
     BuildList(usize),
 
-    UnaryOp(usize),
+    BeforeOp(usize),
+    AfterOp(usize),
     BinaryOp(usize), // s1 X s0
     BinaryIndex, // s1.s0
 

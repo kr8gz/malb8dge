@@ -26,7 +26,8 @@ pub enum NodeType {
     While { cond: BNode, mode: IterMode, block: BNode },            // x ~        [mode] ? ... // x ~          [mode] [ ... ] //
     Loop { mode: IterMode, block: BNode },                          //                   ? ... //            ? [mode] { ... } //
     Function { args: VNode, block: BNode },
-    UnaryOp { target: BNode, op: usize }, // op: usize = op id
+    BeforeOp { target: BNode, op: usize }, // op: usize = op id
+    AfterOp { target: BNode, op: usize }, // op: usize = op id
     BinOp { a: BNode, op: usize, b: BNode },
     Compare { first: BNode, chain: Vec<(String, BNode)> },
     Increment { target: BNode, mode: IncrMode },
@@ -63,7 +64,7 @@ impl Display for NodeType {
             Self::While { .. } => "while loop".into(),
             Self::Loop { .. } => "loop".into(),
             Self::Function { .. } => "function definition".into(),
-            Self::UnaryOp { .. } | Self::BinOp { .. } => "expression".into(),
+            Self::BeforeOp { .. } | Self::AfterOp { .. } | Self::BinOp { .. } => "expression".into(),
             Self::Increment { .. } => "incrementation".into(),
             Self::Compare { .. } => "comparison".into(),
             Self::FnCall { .. } => "function call".into(),

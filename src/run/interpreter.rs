@@ -6,7 +6,11 @@ use ariadne::{Fmt, Color::*};
 
 use itertools::Itertools;
 
-use crate::{compile::{compiler::Compiler, instructions::*}, util::{*, errors::{self, Error}, Pos, operators}, parse::ast::*};
+use crate::{
+    compile::{compiler::Compiler, instructions::*},
+    util::{*, errors::{self, Error}, Pos, operators::{self, *}},
+    parse::ast::*
+};
 
 use super::types::*;
 
@@ -45,6 +49,14 @@ impl Interpreter {
         }
     }
 
+    fn to_num(&self, value: &ValueType) -> Option<f64> {
+        use ValueType::*;
+        match value {
+            Number(num) => Some(*num),
+            _ => self.to_int(value)
+        }
+    }
+
     fn to_bool(&self, value: &ValueType) -> bool {
         use ValueType::*;
         match value {
@@ -56,12 +68,12 @@ impl Interpreter {
         }
     }
 
-    fn to_string(&self, id: usize) -> String {
+    fn to_string(&self, value: &Value) -> String {
         use ValueType::*;
-        match &self.memory[id].data {
+        match &value.data {
             Function(_) => "<function>".into(),
             List(list) => {
-                format!("[{}]", list.iter().map(|&v| self.repr_string(v)).collect::<Vec<_>>().join(", "))
+                format!("[{}]", list.iter().map(|&v| self.repr_string(&self.memory[v])).collect::<Vec<_>>().join(", "))
             },
             Boolean(b) => b.to_string(),
             String(s) => s.clone(),
@@ -70,18 +82,18 @@ impl Interpreter {
         }
     }
 
-    fn repr_string(&self, id: usize) -> String {
+    fn repr_string(&self, value: &Value) -> String {
         use ValueType::*;
-        match &self.memory[id].data {
+        match &value.data {
             String(s) => format!("\"{s}\""),
             Null() => "null".into(),
-            _ => self.to_string(id),
+            _ => self.to_string(value),
         }
     }
 
     fn join_list(&self, list: &[usize], sep: &str) -> String {
         list.iter()
-            .map(|&v| self.to_string(v))
+            .map(|&v| self.to_string(&self.memory[v]))
             .join(sep)
     }
 
@@ -121,6 +133,88 @@ impl Interpreter {
                 };
             }
 
+            macro_rules! clone {
+                ( $id:expr ) => {
+                    if let ValueType::List(list) = &self.memory[$id].data {
+                        push!(List, list.clone())
+                    } else {
+                        $id
+                    }
+                }
+            }
+
+            macro_rules! unwrap_type_err {
+                (
+                    value: $value:expr,
+                    expr: $expr:expr,
+                    expected: $expected:literal,
+                    for: $for:literal
+                ) => {
+                    match $expr {
+                        Some(x) => x,
+                        None => return Err(
+                            Error::err("Type error")
+                                .label(instr.pos.clone(), format!("Expected {} for {}", $expected, $for))
+                                .label($value.pos.clone(), format!("Cannot convert {} to {}", self.repr_string(&$value), $expected))
+                        )
+                    }
+                }
+            }
+
+            macro_rules! unary_ops {
+                (
+                    $target:ident, $op:ident, $type:ident
+                    $(
+                        $impl_op:literal {
+                            $(
+                                $( % convert $from:pat => $to:expr; )+
+                            )?
+                            $( $a:pat => $ret:expr; )*
+                        }
+                    )*
+                ) => {
+                    use ValueType::*;
+                    
+                    let repr = match OpType::$type {
+                        OpType::Before => format!("{}x", $op),
+                        OpType::After => format!("x{}", $op),
+                        _ => panic!("specified type isn't a unary operator")
+                    };
+
+                    let err = Error::err("Type error")
+                        .label($target.pos.clone(), format!("This has type '{}'", $target.type_name()))
+                        .label(
+                            instr.pos.clone(),
+                            format!("{repr} is not implemented for type '{}'", $target.type_name())
+                        );
+
+                    match $op {
+                        $(
+                            $impl_op => {
+                                $(
+                                    match &$target.data {
+                                        $( $from => $target = $to.into_value(&$target.pos), )+
+                                        _ => ()
+                                    }
+                                )?
+
+                                match $target.data {
+                                    $(
+                                        $a => {
+                                            push!(Value, $ret.into_value(&instr.pos));
+                                        }
+                                    )*
+                                    #[allow(unreachable_patterns)] // not every operator matches all types
+                                    _ => return Err(err)
+                                }
+                            }
+                        )*
+                        _ => panic!("no implementation found for {repr}")
+                    };
+                }
+            }
+
+            #[allow(unused_parens)] // I HATE RUST ANALYZER
             match instr.data {
                 Instruction::LoadConst(id) => {
                     push!(Value, self.constants[id].clone());
@@ -141,14 +235,7 @@ impl Interpreter {
                     let value_id = pop!(Id);
 
                     let index = pop!(Value);
-                    let mut i = match self.to_int(&index.data) {
-                        Some(i) => i,
-                        None => return Err(
-                            Error::err("Type error")
-                                .label(instr.pos.clone(), "Expected an integer as list index")
-                                .label(index.pos.clone(), "Cannot convert this to an integer")
-                        )
-                    };
+                    let mut i = unwrap_type_err!(value: index, expr: self.to_int(&index.data), expected: "an integer", for: "list index");
 
                     let target_id = pop!(Id);
                     let mut target = self.memory[target_id].clone();
@@ -186,14 +273,14 @@ impl Interpreter {
                                     .nth(index as usize)
                                     .map(|(pos, ch)| pos..pos + ch.len_utf8())
                                     .unwrap(),
-                                &self.to_string(value_id),
+                                &self.to_string(&self.memory[value_id]),
                             );
                         }
 
                         _ => return Err(
                             Error::err("Type error")
-                            .label(instr.pos.clone(), "Expected a list to assign to")
-                            .label(target.pos.clone(), "Cannot convert this to a list")
+                                .label(instr.pos.clone(), "Expected a list to assign to")
+                                .label(target.pos.clone(), "Cannot convert this to a list")
                         )
                     };
 
@@ -209,11 +296,130 @@ impl Interpreter {
                     push!(List, list);
                 }
             
-                Instruction::UnaryOp(op_id) => {
-                    todo!("run unary op {op_id}")
+                Instruction::BeforeOp(op_id) => {
+                    let op = operators::id_sym(op_id);
+
+                    let target_id = pop!(Id);
+                    let mut target = self.memory[target_id].clone();
+
+                    unary_ops! {
+                        target, op, Before
+
+                        "!" {
+                            a => Boolean(!self.to_bool(&a));
+                        }
+
+                        "^" {
+                            a => List({
+                                let i = unwrap_type_err!(value: self.memory[target_id], expr: self.to_int(&a), expected: "an integer", for: "^x") as i64;
+                                if i < 0 { i..0 } else { 0..i }.map(|i| push!(Number, i as f64)).collect()
+                            });
+                        }
+
+                        "?\\" {
+
+                        }
+
+                        "-" {
+                            a => Number(-unwrap_type_err!(value: self.memory[target_id], expr: self.to_num(&a), expected: "a number", for: "-x"));
+                        }
+
+                        "." {
+                            
+                        }
+
+                        "`" {
+
+                        }
+
+                        "``" {
+
+                        }
+
+                        "*" {
+
+                        }
+
+                        "@" {
+                            % convert (Boolean(_) | Null()) => String(self.repr_string(&self.memory[target_id]));
+
+                            String(a)   => String(a.reverse());
+                            List(mut a) => List({ a.reverse(); a });
+                            Number(a)   => Number(a.abs().to_string().reverse().parse::<f64>().unwrap().copysign(a));
+                        }
+
+                        "^^" {
+
+                        }
+
+                        "#" {
+                            
+                        }
+
+                        "'" {
+
+                        }
+                    }
+                }
+
+                Instruction::AfterOp(op_id) => {
+                    let op = operators::id_sym(op_id);
+
+                    let target_id = pop!(Id);
+                    let mut target = self.memory[target_id].clone();
+
+                    unary_ops! {
+                        target, op, After
+                        
+                        "^^" {
+
+                        }
+
+                        "##" {
+
+                        }
+
+                        "#\\" {
+
+                        }
+
+                        "#$" {
+
+                        }
+
+                        "_" {
+                            % convert (Boolean(_) | Null()) => String(self.to_string(&self.memory[target_id]));
+
+                            String(a)   => Number(a.len() as f64);
+                            List(a)     => Number(a.len() as f64);
+                            Number(a)   => Number(a.to_string().len() as f64);
+                        }
+
+                        "``" {
+
+                        }
+
+                        "$$" {
+
+                        }
+
+                        "$" {
+
+                        }
+
+                        "'" {
+                            
+                        }
+
+                        "`" {
+
+                        }
+                    }
                 }
 
                 Instruction::BinaryOp(op_id) => {
+                    let op = operators::id_sym(op_id);
+
                     let mut b_id = pop!(Id);
                     let mut rhs = self.memory[b_id].clone();
                     let rhs_type = rhs.type_name();
@@ -222,8 +428,6 @@ impl Interpreter {
                     let mut lhs = self.memory[a_id].clone();
                     let lhs_type = lhs.type_name();
 
-                    let op = operators::id_sym(op_id);
-
                     macro_rules! bin_ops {
                         (
                             $(
@@ -231,15 +435,15 @@ impl Interpreter {
                                     $(
                                         % convert
                                         // can use the x_id vars to get the unconverted version
-                                        $( $pre:pat => $expr:expr; )+
+                                        $( $from:pat => $to:expr; )+
                                     )?
                                     $(
                                         % one way
-                                        $( $a1:pat, $b1:pat => $expr1:expr; )+
+                                        $( $a1:pat, $b1:pat => $ret1:expr; )+
                                     )?
                                     $(
                                         % both ways
-                                        $( $a2:pat, $b2:pat => $expr2:expr; )+
+                                        $( $a2:pat, $b2:pat => $ret2:expr; )+
                                     )?
                                 }
                             )*
@@ -259,33 +463,33 @@ impl Interpreter {
                                     $op => {
                                         $(
                                             match &lhs.data {
-                                                $( $pre => lhs = $expr.into_value(&lhs.pos), )+
+                                                $( $from => lhs = $to.into_value(&lhs.pos), )+
                                                 _ => ()
                                             }
                                             match &rhs.data {
-                                                $( $pre => rhs = $expr.into_value(&rhs.pos), )+
+                                                $( $from => rhs = $to.into_value(&rhs.pos), )+
                                                 _ => ()
                                             }
                                         )?
 
-                                        match ( lhs.data, rhs.data ) {
+                                        match (lhs.data, rhs.data) {
                                             $(
                                                 $(
-                                                    ( $a1, $b1 ) => {
-                                                        push!(Value, $expr1.into_value(&instr.pos));
+                                                    ($a1, $b1) => {
+                                                        push!(Value, $ret1.into_value(&instr.pos));
                                                     }
                                                 )+
                                             )?
                                             $(
                                                 $(
-                                                    ( $a2, $b2 ) => {
-                                                        push!(Value, $expr2.into_value(&instr.pos));
+                                                    ($a2, $b2) => {
+                                                        push!(Value, $ret2.into_value(&instr.pos));
                                                     }
                                                     
                                                     #[allow(unused_assignments)] // they can be used in the op implementations
-                                                    ( $b2, $a2 ) => {
+                                                    ($b2, $a2) => {
                                                         (a_id, b_id) = (b_id, a_id);
-                                                        push!(Value, $expr2.into_value(&instr.pos));
+                                                        push!(Value, $ret2.into_value(&instr.pos));
                                                     }
                                                 )+
                                             )?
@@ -294,7 +498,7 @@ impl Interpreter {
                                         }
                                     }
                                 )*
-                                _ => todo!("run binary op {op_id}")
+                                _ => panic!("no implementation found for a {op} b")
                             };
                         }
                     }
@@ -303,7 +507,6 @@ impl Interpreter {
                         ( $a:ident, $b:ident ) => { $a.iter().chain($b.iter()).unique().copied() }
                     }
                     
-                    // basically writing std lmao
                     bin_ops! {
                         "||" {
                             % one way
@@ -369,7 +572,7 @@ impl Interpreter {
 
                             % both ways
                             List(a),    _           =>  List(a.into_iter().chain([b_id]).collect());
-                            String(a),  _           =>  String(a + &self.to_string(b_id));
+                            String(a),  _           =>  String(a + &self.to_string(&self.memory[b_id]));
                         }
 
                         "-" {
@@ -435,13 +638,7 @@ impl Interpreter {
                             List(a),    Number(b)   =>  List({
                                                             let mut res = Vec::new();
                                                             for _ in 0..b.abs() as usize {
-                                                                res.extend(a.iter().map(|&id| {
-                                                                    if let ValueType::List(list) = &self.memory[id].data {
-                                                                        push!(List, list.clone()) // 3 * [3 * [x]]
-                                                                    } else {
-                                                                        id
-                                                                    }
-                                                                }));
+                                                                res.extend(a.iter().map(|&id| clone!(id)));
                                                             }
                                                             if b < 0.0 { res.reverse(); }
                                                             res
@@ -449,7 +646,7 @@ impl Interpreter {
                             
                             String(mut a), Number(b) => String({
                                                             a = a.repeat(b.abs() as usize);
-                                                            if b < 0.0 { a = a.chars().rev().collect(); }
+                                                            if b < 0.0 { a = a.reverse(); }
                                                             a
                                                         });
                         }
@@ -495,7 +692,7 @@ impl Interpreter {
                             Number(a),  Number(b)   =>  Number(a.powf(b));
                             List(a),    List(b)     =>  List(set_helper!(a, b).filter(|id| a.contains(id) != b.contains(id)).collect());
                             
-                            List(a),    String(b)   =>  String(a.into_iter().map(|id| self.to_string(id)).join(&b));
+                            List(a),    String(b)   =>  String(a.into_iter().map(|id| self.to_string(&self.memory[id])).join(&b));
                             String(a),  String(b)   =>  String(a.chars().map(|c| c.to_string()).intersperse(b).collect());
                         }
 
@@ -515,56 +712,48 @@ impl Interpreter {
 
                 Instruction::BinaryIndex => {
                     let index = pop!(Value);
+                    let mut i = unwrap_type_err!(value: index, expr: self.to_int(&index.data), expected: "an integer", for: "list index");
+
                     let target = pop!(Value);
 
-                    match self.to_int(&index.data) {
-                        Some(mut i) => {
-                            macro_rules! index {
-                                ( $len:expr ) => {
-                                    {
-                                        let len = $len as f64;
-                                        if i < 0.0 {
-                                            i += len;
-                                        }
-                                        if i < 0.0 || i >= len {
-                                            return Err(
-                                                Error::err("Index out of bounds")
-                                                    .label(target.pos.clone(), format!("Length of this is {len}"))
-                                                    .label(index.pos.clone(), format!("Index is {i}"))
-                                            )
-                                        }
-                                        i
-                                    }
+                    macro_rules! index {
+                        ( $len:expr ) => {
+                            {
+                                let len = $len as f64;
+                                if i < 0.0 {
+                                    i += len;
                                 }
+                                if i < 0.0 || i >= len {
+                                    return Err(
+                                        Error::err("Index out of bounds")
+                                            .label(target.pos.clone(), format!("Length of this is {len}"))
+                                            .label(index.pos.clone(), format!("Index is {i}"))
+                                    )
+                                }
+                                i
                             }
-
-                            match &target.data {
-                                ValueType::List(list) => {
-                                    push!(Id, list[index!(list.len()) as usize]);
-                                }
-
-                                ValueType::String(s) => {
-                                    push!(String, s.chars().nth(index!(s.len()) as usize).unwrap().to_string());
-                                }
-
-                                ValueType::Number(num) => {
-                                    push!(Number, index!(*num));
-                                }
-
-                                _ => return Err(
-                                    Error::err("Type error")
-                                        .label(instr.pos.clone(), "Expected a list to index")
-                                        .label(target.pos.clone(), "Cannot convert this to a list")
-                                )
-                            };
-                            
-                        },
-                        None => return Err(
-                            Error::err("Type error")
-                                .label(instr.pos.clone(), "Expected an integer as list index")
-                                .label(index.pos.clone(), "Cannot convert this to an integer")
-                        )
+                        }
                     }
+
+                    match &target.data {
+                        ValueType::List(list) => {
+                            push!(Id, list[index!(list.len()) as usize]);
+                        }
+
+                        ValueType::String(s) => {
+                            push!(String, s.chars().nth(index!(s.len()) as usize).unwrap().to_string());
+                        }
+
+                        ValueType::Number(num) => {
+                            push!(Number, index!(*num));
+                        }
+
+                        _ => return Err(
+                            Error::err("Type error")
+                                .label(instr.pos.clone(), "Expected a list to index")
+                                .label(target.pos.clone(), "Cannot convert this to a list")
+                        )
+                    };
                 }
             
                 Instruction::Print(ref mode) => {
@@ -579,7 +768,7 @@ impl Interpreter {
                             }
                         }
                         _ => {
-                            let value = self.to_string(id);
+                            let value = self.to_string(&self.memory[id]);
                             match mode {
                                 Default | NoNewline       => print!("{}", value),
                                 Spaces  | NoNewlineSpaces => print!("{}", value.chars().intersperse(' ').collect::<String>()),

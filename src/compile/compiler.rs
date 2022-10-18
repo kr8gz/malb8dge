@@ -34,7 +34,8 @@ impl Compiler {
     fn push_op(&mut self, op_type: OpType, op: &str, pos: &Pos, func: usize) {
         let id = operators::op_id(op_type, op);
         match op_type {
-            OpType::Before | OpType::After => self.push_instr(Instruction::UnaryOp(id), pos, func),
+            OpType::Before => self.push_instr(Instruction::BeforeOp(id), pos, func),
+            OpType::After => self.push_instr(Instruction::AfterOp(id), pos, func),
             OpType::Binary => self.push_instr(Instruction::BinaryOp(id), pos, func),
             _ => panic!()
         }
@@ -195,10 +196,16 @@ impl Compiler {
                 todo!("function {args:?}, {block:?}")
             }
 
-            NodeType::UnaryOp { target, op } => {
+            NodeType::BeforeOp { target, op } => {
                 // TODO if const args then run op at compile time
                 self.compile_node(*target, true, scope, func)?;
-                self.push_instr(Instruction::UnaryOp(op), pos, func);
+                self.push_instr(Instruction::BeforeOp(op), pos, func);
+            },
+
+            NodeType::AfterOp { target, op } => {
+                // TODO if const args then run op at compile time
+                self.compile_node(*target, true, scope, func)?;
+                self.push_instr(Instruction::AfterOp(op), pos, func);
             },
 
             NodeType::BinOp { a, op, b } => {

@@ -349,7 +349,7 @@ impl Parser {
 
                 "&" | "~" => NodeType::Variable(sym.into()),
 
-                op if operators::is_op(Before, op) => NodeType::UnaryOp {
+                op if operators::is_op(Before, op) => NodeType::BeforeOp {
                     op: operators::op_id(Before, op),
                     target: Box::new(self.parse_operation(operators::op_prec(Before, op), false)?.unwrap()),
                 },
@@ -950,7 +950,7 @@ impl Parser {
                         }
                     },
 
-                    op if operators::is_op(After, op) => NodeType::UnaryOp {
+                    op if operators::is_op(After, op) => NodeType::AfterOp {
                         op: operators::op_id(After, op),
                         target: Box::new(parsed_value),
                     },

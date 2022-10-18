@@ -1,14 +1,9 @@
 use std::fs;
 
+use crate::fmt_plural;
 use crate::util::{*, errors::{self, Error}, operators::{self, OpType::*}};
 
 use super::tokens::*;
-
-macro_rules! fmt_plural {
-    ( $s:literal, $n:expr ) => {
-        format!($s, $n, if $n == 1 { "" } else { "s" })
-    }
-}
 
 #[derive(PartialEq)]
 enum ReplaceLexStep {
