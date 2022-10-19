@@ -49,6 +49,11 @@ impl ColorGenerator {
     }
 }
 
+fn replace_color(text: String, color: Color) -> String {
+    let re = regex::Regex::new("#(?P<inner>[^#]*)#").unwrap();
+    re.replace_all(&text, "$inner".fg(color).to_string()).to_string()
+}
+
 pub struct Error {
     msg: String,
     kind: ReportKind,
@@ -108,7 +113,7 @@ impl Error {
                 };
                 report = report.with_label(
                     Label::new((file, pos))
-                        .with_message(msg)
+                        .with_message(replace_color(msg, color))
                         .with_color(color)
                 );
             }
@@ -117,7 +122,7 @@ impl Error {
                 let color = colgen.next();
                 report = report.with_label(
                     Label::new((file, pos))
-                        .with_message(format!("{}: {}", n.to_string().fg(color), msg))
+                        .with_message(format!("{}: {}", n.to_string().fg(color), replace_color(msg, color)))
                         .with_order(n)
                         .with_color(color)
                 );

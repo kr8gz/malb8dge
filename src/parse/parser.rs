@@ -87,7 +87,7 @@ impl Parser {
             
             _ => return Err(
                 Error::err("Syntax error")
-                    .label(self.curr().pos, format!("Found {found} here"))
+                    .label(self.curr().pos, format!("Found #{found}# here"))
                     .label(node.pos, format!("Expected {}, found {}", expected.fg(Green), node.data.fg(Red)))
             )
         };
@@ -335,7 +335,7 @@ impl Parser {
                             if !matches!(val.data, NodeType::Variable(_) | NodeType::Index { .. } ) {
                                 return Err(
                                     Error::err("Syntax error")
-                                        .label(pos, format!("Found {verb} operator here"))
+                                        .label(pos, format!("Found #{verb} operator# here"))
                                         .label(val.pos, format!("Expected {}, found {}", "variable".fg(Green), val.data.fg(Red)))
                                         .note(format!("Only variables can be {verb}ed"))
                                 )
@@ -498,10 +498,14 @@ impl Parser {
     fn parse_fragment(&mut self, frag: LexedFragment) -> Result<ParsedFragment> {
         Ok(match frag {
             LexedFragment::Literal(lit) => ParsedFragment::Literal(lit),
-            LexedFragment::Expr(expr) => {
-                let mut parser = Self::new(expr);
+            LexedFragment::Expr(lexer) => {
+                let pos = lexer.actual_pos - lexer.char_index..lexer.actual_pos;
+                let mut parser = Self::new(lexer);
                 parser.parse()?;
-                ParsedFragment::Expr(parser.statements)
+                ParsedFragment::Expr(Node {
+                    data: NodeType::Statements(parser.statements),
+                    pos
+                })
             }
         })
     }
@@ -940,7 +944,7 @@ impl Parser {
                                 if !matches!(parsed_value.data, NodeType::Variable(_) | NodeType::Index { .. } ) {
                                     return Err(
                                         Error::err("Syntax error")
-                                            .label(pos, format!("Found {verb} operator here"))
+                                            .label(pos, format!("Found #{verb} operator# here"))
                                             .label(parsed_value.pos, format!("Expected {}, found {}", "variable".fg(Green), parsed_value.data.fg(Red)))
                                             .note(format!("Only variables can be {verb}ed"))
                                     )

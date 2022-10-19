@@ -22,8 +22,23 @@ impl Compiler {
         }
     }
 
-    fn push_instr(&mut self, instr: Instruction, pos: &Pos, func: usize) {
-        self.functions[func].instructions.push(InstrData { data: instr, pos: pos.clone() });
+    fn push_instr(&mut self, instr: Instruction, pos: &Pos, func: usize) -> usize {
+        let instrs = &mut self.functions[func].instructions;
+        instrs.push(InstrData { data: instr, pos: pos.clone() });
+        instrs.len() - 1
+    }
+
+    fn edit_instr(&mut self, func: usize, index: usize, num: usize) {
+        use Instruction::*;
+        match &mut self.functions[func].instructions[index].data {
+            Jump(n) |
+            PopJumpIfFalse(n) => *n = num,
+            _ => ()
+        }
+    }
+
+    fn curr_index(&self, func: usize) -> usize {
+        self.functions[func].instructions.len()
     }
 
     fn push_const(&mut self, constant: ValueType, pos: &Pos, func: usize) {
@@ -38,7 +53,7 @@ impl Compiler {
             OpType::After => self.push_instr(Instruction::AfterOp(id), pos, func),
             OpType::Binary => self.push_instr(Instruction::BinaryOp(id), pos, func),
             _ => panic!()
-        }
+        };
     }
 
     fn new_var(&mut self, name: &str, scope: usize) -> usize {
@@ -90,22 +105,28 @@ impl Compiler {
         let Node { data, ref pos } = node;
 
         match data {
-            NodeType::Statements(stmts) => {
-                for stmt in stmts {
-                    self.compile_node(stmt, false, scope, func)?;
+            NodeType::Statements(mut stmts) => {
+                if let Some(last) = stmts.pop() {
+                    for stmt in stmts {
+                        self.compile_node(stmt, false, scope, func)?;
+                    }
+                    self.compile_node(last, true, scope, func)?;
                 }
             }
 
             NodeType::Return(expr) => {
-                todo!("return {expr:?}")
+                self.compile_or_null(*expr, pos, scope, func)?;
+                self.push_instr(Instruction::Return, pos, func);
             }
 
             NodeType::Break(expr) => {
-                todo!("break {expr:?}")
+                self.compile_or_null(*expr, pos, scope, func)?;
+                self.push_instr(Instruction::Break, pos, func);
             }
 
             NodeType::Continue(expr) => {
-                todo!("continue {expr:?}")
+                self.compile_or_null(*expr, pos, scope, func)?;
+                self.push_instr(Instruction::Continue, pos, func);
             }
 
             NodeType::Exit(expr) => {
@@ -126,10 +147,8 @@ impl Compiler {
                             self.push_instr(Instruction::BinaryIndex, pos, func);
                             self.compile_node(*value, true, scope, func)?;
                             self.push_op(OpType::Binary, &op, pos, func);
-                            if is_expr {
-                                self.push_instr(Instruction::DupOne, pos, func);
-                                self.push_instr(Instruction::RotFour, pos, func);
-                            }
+                            self.push_instr(Instruction::DupOne, pos, func);
+                            self.push_instr(Instruction::RotFour, pos, func);
                             self.push_instr(Instruction::StoreIndex, pos, func);
                         }
     
@@ -137,9 +156,7 @@ impl Compiler {
                             let id = self.compile_variable(&name, &target.pos, scope, func)?;
                             self.compile_node(*value, true, scope, func)?;
                             self.push_op(OpType::Binary, &op, pos, func);
-                            if is_expr {
-                                self.push_instr(Instruction::DupOne, pos, func);
-                            }
+                            self.push_instr(Instruction::DupOne, pos, func);
                             self.push_instr(Instruction::StoreVar(id), pos, func);
                         }
     
@@ -151,18 +168,14 @@ impl Compiler {
                             self.compile_node(*target, true, scope, func)?;
                             self.compile_node(*index, true, scope, func)?;
                             self.compile_node(*value, true, scope, func)?;
-                            if is_expr {
-                                self.push_instr(Instruction::DupOne, pos, func);
-                                self.push_instr(Instruction::RotFour, pos, func);
-                            }
+                            self.push_instr(Instruction::DupOne, pos, func);
+                            self.push_instr(Instruction::RotFour, pos, func);
                             self.push_instr(Instruction::StoreIndex, pos, func);
                         }
     
                         NodeType::Variable(name) => {
                             self.compile_node(*value, true, scope, func)?;
-                            if is_expr {
-                                self.push_instr(Instruction::DupOne, pos, func);
-                            }
+                            self.push_instr(Instruction::DupOne, pos, func);
                             let id = self.get_var(&name, scope).unwrap_or_else(|| self.new_var(&name, scope));
                             self.push_instr(Instruction::StoreVar(id), pos, func);
                         }
@@ -177,7 +190,24 @@ impl Compiler {
             }
 
             NodeType::If { cond, on_true, on_false } => {
-                todo!("if {cond:?}, {on_true:?}, {on_false:?}")
+                // TODO if cond is const then dont compile where it wont go to
+                self.compile_node(*cond, true, scope, func)?;
+
+                macro_rules! compile_block {
+                    ( $block:ident ) => {
+                        if let Some(block) = *$block {
+                            let inner = self.new_scope(scope);
+                            self.compile_node(block, true, inner, func)?;
+                        }
+                    }
+                }
+
+                let jump_false = self.push_instr(Instruction::PopJumpIfFalse(0), pos, func);
+                compile_block!(on_true);
+                let jump_end = self.push_instr(Instruction::Jump(0), pos, func);
+                self.edit_instr(func, jump_false, jump_end + 1);
+                compile_block!(on_false);
+                self.edit_instr(func, jump_end, self.curr_index(func))
             }
 
             NodeType::For { iter, vars, mode, block } => {
@@ -223,7 +253,7 @@ impl Compiler {
                 let compile_op_part = |s: &mut Compiler| {
                     s.push_const(ValueType::Number(1.0), pos, func);
                     s.push_op(OpType::Binary, if mode.add() { "+" } else { "-" }, pos, func);
-                    if is_expr && mode.bef() {
+                    if mode.bef() {
                         s.push_instr(Instruction::DupOne, pos, func);
                         s.push_instr(Instruction::RotFour, pos, func);
                     }
@@ -235,7 +265,7 @@ impl Compiler {
                         self.compile_node(*index, true, scope, func)?;
                         self.push_instr(Instruction::DupTwo, pos, func); // duplicate target and index for storing later
                         self.push_instr(Instruction::BinaryIndex, pos, func);
-                        if is_expr && mode.aft() {
+                        if mode.aft() {
                             self.push_instr(Instruction::DupOne, pos, func);
                             self.push_instr(Instruction::RotFour, pos, func);
                         }
@@ -245,7 +275,7 @@ impl Compiler {
         
                     NodeType::Variable(name) => {
                         let id = self.compile_variable(&name, pos, scope, func)?;
-                        if is_expr && mode.aft() {
+                        if mode.aft() {
                             self.push_instr(Instruction::DupOne, pos, func);
                         }
                         compile_op_part(self);
@@ -326,7 +356,21 @@ impl Compiler {
             },
 
             NodeType::String(frags) => {
-                todo!("string {frags:?}")
+                let concatenations = frags.len() - 1;
+
+                for frag in frags {
+                    match frag {
+                        ParsedFragment::Literal(lit) => self.push_const(ValueType::String(lit), pos, func),
+                        ParsedFragment::Expr(expr) => {
+                            self.compile_node(expr, true, scope, func)?;
+                            self.push_op(OpType::After, "`", pos, func);
+                        },
+                    }
+                }
+
+                for _ in 0..concatenations {
+                    self.push_op(OpType::Binary, "+", pos, func);
+                }
             }
 
             NodeType::Boolean(b) => self.push_const(ValueType::Boolean(b), pos, func),
@@ -341,15 +385,24 @@ impl Compiler {
         Ok(())
     }
 
+    fn compile_or_null(&mut self, node: Option<Node>, pos: &Pos, scope: usize, func: usize) -> Result<()> {
+        match node {
+            Some(node) => self.compile_node(node, true, scope, func)?,
+            None => self.push_const(ValueType::Null(), pos, func),
+        }
+        Ok(())
+    }
+
     fn compile_variable(&mut self, name: &str, pos: &Pos, scope: usize, func: usize) -> Result<usize> {
         match self.get_var(name, scope) {
             Some(id) => {
                 self.push_instr(Instruction::LoadVar(id), pos, func);
                 Ok(id)
-            },
+            }
+
             None => Err(
                 Error::err("Use of undefined variable")
-                    .label(pos.clone(), format!("Couldn't find variable '{name}' in this scope"))
+                    .label(pos.clone(), format!("Couldn't find variable #{name}# in this scope"))
             )
         }
     }

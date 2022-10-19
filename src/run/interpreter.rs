@@ -34,7 +34,11 @@ impl Interpreter {
             vars: vec![None; compiler.var_count],
             stack: Vec::new(),
             call_stack: Vec::new(),
-        }.run_func(0)
+        }.run_func(0)?;
+
+        // TODO implicitly print last returned?
+
+        Ok(())
     }
 
     fn to_int(&self, value: &ValueType) -> Option<f64> {
@@ -68,12 +72,12 @@ impl Interpreter {
         }
     }
 
-    fn to_string(&self, value: &Value) -> String {
+    fn to_string(&self, value: &ValueType) -> String {
         use ValueType::*;
-        match &value.data {
+        match value {
             Function(_) => "<function>".into(),
             List(list) => {
-                format!("[{}]", list.iter().map(|&v| self.repr_string(&self.memory[v])).collect::<Vec<_>>().join(", "))
+                format!("[{}]", list.iter().map(|&v| self.repr_string(&self.memory[v].data)).collect::<Vec<_>>().join(", "))
             },
             Boolean(b) => b.to_string(),
             String(s) => s.clone(),
@@ -82,9 +86,9 @@ impl Interpreter {
         }
     }
 
-    fn repr_string(&self, value: &Value) -> String {
+    fn repr_string(&self, value: &ValueType) -> String {
         use ValueType::*;
-        match &value.data {
+        match value {
             String(s) => format!("\"{s}\""),
             Null() => "null".into(),
             _ => self.to_string(value),
@@ -93,13 +97,15 @@ impl Interpreter {
 
     fn join_list(&self, list: &[usize], sep: &str) -> String {
         list.iter()
-            .map(|&v| self.to_string(&self.memory[v]))
+            .map(|&v| self.to_string(&self.memory[v].data))
             .join(sep)
     }
 
-    fn run_func(&mut self, func: usize) -> Result<()> {
+    fn run_func(&mut self, func: usize) -> Result<Option<usize>> {
         let instructions = &self.functions[func].instructions;
         let mut instr_pos = 0;
+
+        let mut returned = None;
 
         while instr_pos < instructions.len() {
             let instr = &instructions[instr_pos];
@@ -133,27 +139,22 @@ impl Interpreter {
                 };
             }
 
-            macro_rules! clone {
-                ( $id:expr ) => {
-                    if let ValueType::List(list) = &self.memory[$id].data {
+            macro_rules! data {
+                ( StackTop ) => {
+                    data!(Ref, *self.stack.last().unwrap())
+                };
+
+                ( Ref, $id:expr ) => {
+                    &self.memory[$id].data
+                };
+
+                ( Clone, $id:expr ) => {
+                    if let ValueType::List(list) = data!(Ref, $id) {
                         push!(List, list.clone())
                     } else {
                         $id
                     }
-                }
-            }
-
-            macro_rules! unwrap_type_err {
-                ( $value:expr => $func:ident; expected $expected:literal for $for:literal ) => {
-                    match self.$func(&$value.data) {
-                        Some(x) => x,
-                        None => return Err(
-                            Error::err("Type error")
-                                .label(instr.pos.clone(), format!("Expected {} for {}", $expected, $for))
-                                .label($value.pos.clone(), format!("Cannot convert {} to {}", self.repr_string(&$value), $expected))
-                        )
-                    }
-                }
+                };
             }
 
             macro_rules! unary_ops {
@@ -177,10 +178,10 @@ impl Interpreter {
                     };
 
                     let err = Error::err("Type error")
-                        .label($target.pos.clone(), format!("This has type '{}'", $target.type_name()))
+                        .label($target.pos.clone(), format!("This has type #{}#", $target.type_name()))
                         .label(
                             instr.pos.clone(),
-                            format!("{repr} is not implemented for type '{}'", $target.type_name())
+                            format!("#{repr}# is not implemented for type #{}#", $target.type_name())
                         );
 
                     match $op {
@@ -230,7 +231,11 @@ impl Interpreter {
                     let value_id = pop!(Id);
 
                     let index = pop!(Value);
-                    let mut i = unwrap_type_err!(index => to_int; expected "an integer" for "list index");
+                    let mut i = self.to_int(&index.data).ok_or_else(|| {
+                        Error::err("Type error")
+                            .label(instr.pos.clone(), "Expected an integer for list index")
+                            .label(index.pos.clone(), format!("Cannot convert #{}# to an integer", self.repr_string(&index.data)))
+                    })?;
 
                     let target_id = pop!(Id);
                     let mut target = self.memory[target_id].clone();
@@ -245,8 +250,8 @@ impl Interpreter {
                                 if i < 0.0 || i >= len {
                                     return Err(
                                         Error::err("Index out of bounds")
-                                            .label(target.pos.clone(), format!("Length of this is {len}"))
-                                            .label(index.pos.clone(), format!("Index is {i}"))
+                                            .label(target.pos.clone(), format!("Length of this is #{len}#"))
+                                            .label(index.pos.clone(), format!("Index is #{i}#"))
                                     )
                                 }
                                 i
@@ -268,14 +273,14 @@ impl Interpreter {
                                     .nth(index as usize)
                                     .map(|(pos, ch)| pos..pos + ch.len_utf8())
                                     .unwrap(),
-                                &self.to_string(&self.memory[value_id]),
+                                &self.to_string(data!(Ref, value_id)),
                             );
                         }
 
                         _ => return Err(
                             Error::err("Type error")
                                 .label(instr.pos.clone(), "Expected a list to assign to")
-                                .label(target.pos.clone(), "Cannot convert this to a list")
+                                .label(target.pos.clone(), format!("Cannot convert #{}# to a list", self.repr_string(&target.data)))
                         )
                     };
 
@@ -301,14 +306,18 @@ impl Interpreter {
                         target, op, Before
 
                         "!" {
-                            a => Boolean(!self.to_bool(&a));
+                            a   =>  Boolean(!self.to_bool(&a));
                         }
 
                         "^" {
-                            a => List({
-                                let i = unwrap_type_err!(self.memory[target_id] => to_int; expected "an integer" for "^x") as i64;
-                                if i < 0 { i..0 } else { 0..i }.map(|i| push!(Number, i as f64)).collect()
-                            });
+                            a   =>  List({
+                                        let i = self.to_int(&a).ok_or_else(|| {
+                                            Error::err("Type error")
+                                                .label(instr.pos.clone(), format!("Expected an integer for {op}x"))
+                                                .label(target.pos.clone(), format!("Cannot convert #{}# to an integer", self.repr_string(&a)))
+                                        })? as i64;
+                                        if i < 0 { i..0 } else { 0..i }.map(|i| push!(Number, i as f64)).collect()
+                                    });
                         }
 
                         "?\\" {
@@ -316,7 +325,11 @@ impl Interpreter {
                         }
 
                         "-" {
-                            a => Number(-unwrap_type_err!(self.memory[target_id] => to_num; expected "a number" for "-x"));
+                            a   =>  Number(-self.to_num(&a).ok_or_else(|| {
+                                        Error::err("Type error")
+                                            .label(instr.pos.clone(), format!("Expected a number for {op}x"))
+                                            .label(target.pos.clone(), format!("Cannot convert #{}# to a number", self.repr_string(&a)))
+                                    })?);
                         }
 
                         "." {
@@ -336,7 +349,7 @@ impl Interpreter {
                         }
 
                         "@" {
-                            % convert (Boolean(_) | Null()) => String(self.repr_string(&self.memory[target_id]));
+                            % convert (Boolean(_) | Null()) => String(self.repr_string(data!(Ref, target_id)));
 
                             String(a)   => String(a.reverse());
                             List(mut a) => List({ a.reverse(); a });
@@ -383,11 +396,11 @@ impl Interpreter {
                         }
 
                         "_" {
-                            % convert (Boolean(_) | Null()) => String(self.to_string(&self.memory[target_id]));
+                            % convert (Boolean(_) | Null()) => String(self.to_string(data!(Ref, target_id)));
 
-                            String(a)   => Number(a.len() as f64);
-                            List(a)     => Number(a.len() as f64);
-                            Number(a)   => Number(a.to_string().len() as f64);
+                            String(a)   =>  Number(a.len() as f64);
+                            List(a)     =>  Number(a.len() as f64);
+                            Number(a)   =>  Number(a.to_string().len() as f64);
                         }
 
                         "``" {
@@ -399,7 +412,13 @@ impl Interpreter {
                         }
 
                         "$" {
+                            % convert a @ (Boolean(_) | Null()) => Number(self.to_int(a).unwrap());
 
+                            a @ Number(_)   =>  a;
+                            String(a)       =>  Number(a.parse().map_err(|_| Error::err("Value error")
+                                                    .label(instr.pos.clone(), "Found conversion to number")
+                                                    .label(target.pos, format!("Cannot convert #\"{a}\"# to a number"))
+                                                )?);
                         }
 
                         "'" {
@@ -407,7 +426,7 @@ impl Interpreter {
                         }
 
                         "`" {
-
+                            a => String(self.to_string(&a));
                         }
                     }
                 }
@@ -446,11 +465,11 @@ impl Interpreter {
                             use ValueType::*;
                             
                             let err = Error::err("Type error")
-                                .label(lhs.pos.clone(), format!("This has type '{lhs_type}'"))
-                                .label(rhs.pos.clone(), format!("This has type '{rhs_type}'"))
+                                .label(lhs.pos.clone(), format!("This has type #{lhs_type}#"))
+                                .label(rhs.pos.clone(), format!("This has type #{rhs_type}#"))
                                 .label(
                                     instr.pos.clone(),
-                                    format!("Binary '{op}' is not implemented for types '{lhs_type}' and '{rhs_type}'")
+                                    format!("Binary #{op}# is not implemented for types #{lhs_type}# and #{rhs_type}#")
                                 );
 
                             match op {
@@ -565,9 +584,11 @@ impl Interpreter {
                             String(a),  String(b)   =>  String(a + &b);
                             String(a),  List(b)     =>  String(a + &self.join_list(&b, ""));
 
+                            String(a),  _           =>  String(a + &self.to_string(data!(Ref, b_id)));
+                            _,          String(b)   =>  String(self.to_string(data!(Ref, a_id)) + &b);
+
                             % both ways
                             List(a),    _           =>  List(a.into_iter().chain([b_id]).collect());
-                            String(a),  _           =>  String(a + &self.to_string(&self.memory[b_id]));
                         }
 
                         "-" {
@@ -589,12 +610,12 @@ impl Interpreter {
                                                                             "length 1".fg(Green),
                                                                         ))
                                                                         .label(lhs.pos, format!(
-                                                                            "This string has length {}",
-                                                                            a.len().fg(if a.len() == 1 { Green } else { Red }),
+                                                                            "This string has length #{a}#",
+                                                                            // a.len().fg(if a.len() == 1 { Green } else { Red }),
                                                                         ))
                                                                         .label(rhs.pos, format!(
-                                                                            "This string has length {}",
-                                                                            b.len().fg(if b.len() == 1 { Green } else { Red }),
+                                                                            "This string has length #{b}#",
+                                                                            // b.len().fg(if b.len() == 1 { Green } else { Red }),
                                                                         ))
                                                                 )
                                                             }
@@ -608,12 +629,9 @@ impl Interpreter {
                                                                     Error::err("Value error")
                                                                         .label(
                                                                             instr.pos.clone(),
-                                                                            format!(
-                                                                                "Expected {} for right side of {lhs_type} {op} {rhs_type}",
-                                                                                "number >= 0".fg(Green),
-                                                                            ),
+                                                                            format!("Expected #number >= 0# for right side of {lhs_type} {op} {rhs_type}"),
                                                                         )
-                                                                        .label(rhs.pos, format!("{} is not {}", b.fg(Red), ">= 0".fg(Green)))
+                                                                        .label(rhs.pos, format!("{b} is not >= 0"))
                                                                 )
                                                             }
                                                         });
@@ -633,7 +651,7 @@ impl Interpreter {
                             List(a),    Number(b)   =>  List({
                                                             let mut res = Vec::new();
                                                             for _ in 0..b.abs() as usize {
-                                                                res.extend(a.iter().map(|&id| clone!(id)));
+                                                                res.extend(a.iter().map(|&id| data!(Clone, id)));
                                                             }
                                                             if b < 0.0 { res.reverse(); }
                                                             res
@@ -687,7 +705,7 @@ impl Interpreter {
                             Number(a),  Number(b)   =>  Number(a.powf(b));
                             List(a),    List(b)     =>  List(set_helper!(a, b).filter(|id| a.contains(id) != b.contains(id)).collect());
                             
-                            List(a),    String(b)   =>  String(a.into_iter().map(|id| self.to_string(&self.memory[id])).join(&b));
+                            List(a),    String(b)   =>  String(a.into_iter().map(|id| self.to_string(data!(Ref, id))).join(&b));
                             String(a),  String(b)   =>  String(a.chars().map(|c| c.to_string()).intersperse(b).collect());
                         }
 
@@ -707,7 +725,11 @@ impl Interpreter {
 
                 Instruction::BinaryIndex => {
                     let index = pop!(Value);
-                    let mut i = unwrap_type_err!(index => to_int; expected "an integer" for "list index");
+                    let mut i = self.to_int(&index.data).ok_or_else(|| {
+                        Error::err("Type error")
+                            .label(instr.pos.clone(), "Expected an integer for list index")
+                            .label(index.pos.clone(), format!("Cannot convert #{}# to an integer", self.repr_string(&index.data)))
+                    })?;
 
                     let target = pop!(Value);
 
@@ -721,8 +743,8 @@ impl Interpreter {
                                 if i < 0.0 || i >= len {
                                     return Err(
                                         Error::err("Index out of bounds")
-                                            .label(target.pos.clone(), format!("Length of this is {len}"))
-                                            .label(index.pos.clone(), format!("Index is {i}"))
+                                            .label(target.pos.clone(), format!("Length of this is #{len}#"))
+                                            .label(index.pos.clone(), format!("Index is #{i}#"))
                                     )
                                 }
                                 i
@@ -746,7 +768,7 @@ impl Interpreter {
                         _ => return Err(
                             Error::err("Type error")
                                 .label(instr.pos.clone(), "Expected a list to index")
-                                .label(target.pos.clone(), "Cannot convert this to a list")
+                                .label(target.pos.clone(), format!("Cannot convert #{}# to a list", &self.to_string(&target.data)))
                         )
                     };
                 }
@@ -754,8 +776,8 @@ impl Interpreter {
                 Instruction::Print(ref mode) => {
                     use PrintMode::*;
 
-                    let id = *self.stack.last().unwrap();
-                    match &self.memory[id].data {
+                    let data = data!(StackTop);
+                    match data {
                         ValueType::List(list) => {
                             match mode {
                                 Default | NoNewline       => print!("{}", self.join_list(list, "")),
@@ -763,7 +785,7 @@ impl Interpreter {
                             }
                         }
                         _ => {
-                            let value = self.to_string(&self.memory[id]);
+                            let value = self.to_string(data);
                             match mode {
                                 Default | NoNewline       => print!("{}", value),
                                 Spaces  | NoNewlineSpaces => print!("{}", value.chars().intersperse(' ').collect::<String>()),
@@ -788,9 +810,20 @@ impl Interpreter {
                     );
                     push!(Id, id);
                 }
+
+                Instruction::Jump(pos) => {
+                    instr_pos = pos - 1; // will be incremented next iteration
+                }
+
+                Instruction::PopJumpIfFalse(pos) => {
+                    let data = &pop!(Value).data;
+                    if !self.to_bool(data) {
+                        instr_pos = pos - 1;
+                    }
+                }
             
                 Instruction::PopOne => {
-                    self.stack.pop();
+                    pop!(Id);
                 }
 
                 Instruction::DupOne => {
@@ -801,14 +834,21 @@ impl Interpreter {
                     self.stack.extend_from_within(self.stack.len() - 2..);
                 }
 
-                Instruction::RotThree => {
-                    let last_three = self.stack.len() - 3;
-                    self.stack[last_three..].rotate_right(1);
-                }
-
                 Instruction::RotFour => {
                     let last_three = self.stack.len() - 4;
                     self.stack[last_three..].rotate_right(1);
+                }
+
+                Instruction::Return => {
+                    returned = Some(pop!(Id));
+                }
+
+                Instruction::Break => {
+                    todo!("break")
+                }
+
+                Instruction::Continue => {
+                    todo!("continue")
                 }
             
                 Instruction::Exit => {
@@ -816,9 +856,10 @@ impl Interpreter {
                 }
             }
 
+            if returned.is_some() { break }
             instr_pos += 1;
         }
 
-        Ok(())
+        Ok(returned)
     }
 }

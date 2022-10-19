@@ -38,12 +38,16 @@ pub enum Instruction {
     Print(PrintMode),
     Input,
 
+    Jump(usize),
+    PopJumpIfFalse(usize),
     PopOne,
     DupOne,
     DupTwo,
-    RotThree, // top goes 2 back
     RotFour,
 
+    Return,
+    Break,
+    Continue,
     Exit,
 }
 

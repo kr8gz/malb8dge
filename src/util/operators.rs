@@ -28,8 +28,7 @@ macro_rules! operators {
         ];
 
         pub const COMBINED_SYMBOLS: &[&str] = &[ $( $( $op, )+ )* $( $( $op_n, )+ )* ];
-                                                 // - 2 because After and Other aren't counted
-        pub const MAX_PREC: usize = PREC_LIST.len() - 2;
+        pub const MAX_PREC: usize = PREC_LIST.len();
 
         pub fn op_prec(op_type: OpType, op: &str) -> usize {
             let mut prec = 0;

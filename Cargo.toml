@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 ariadne = "0.1.5"
 itertools = "0.10.5"
+regex = "1.6"

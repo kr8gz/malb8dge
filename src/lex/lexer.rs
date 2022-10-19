@@ -17,9 +17,9 @@ pub struct Lexer {
 
     pub tokens: Vec<Token>,
 
-    actual_pos: usize,
+    pub actual_pos: usize,
+    pub char_index: usize,
     token_start: usize,
-    char_index: usize,
 
     // true = parse what would be floating point numbers as <int>, ".", <int>
     floating_point_override: bool,
@@ -38,9 +38,9 @@ impl Lexer {
         Self {
             chars: code.replace("\r\n", "\n").chars().collect(),
 
+            actual_pos: offset,
             char_index: 0,
             token_start: 0,
-            actual_pos: offset,
 
             floating_point_override: false,
 
@@ -268,11 +268,11 @@ impl Lexer {
                 Error::err("Different number of swap pattern values")
                     .label(
                         left_start..right_start - 1, 
-                        fmt_plural!("Left side has {} value{}", len_l)
+                        fmt_plural!("Left side has #{}# value{}", len_l)
                     )
                     .label(
                         right_start..self.actual_pos - 1,
-                        fmt_plural!("Right side has {} value{}", len_r)
+                        fmt_plural!("Right side has #{}# value{}", len_r)
                     )
                     .help("Add or remove some values to balance both sides")
             )
@@ -283,11 +283,11 @@ impl Lexer {
                 Error::err("More replace values than find values")
                     .label(
                         left_start..right_start - 1,
-                        fmt_plural!("Found {} find value{}", len_l)
+                        fmt_plural!("Found #{}# find value{}", len_l)
                     )
                     .label(
                         right_start..self.actual_pos - 1,
-                        fmt_plural!("Found {} replace value{}", len_r)
+                        fmt_plural!("Found #{}# replace value{}", len_r)
                     )
                     .help("Add more find values or remove some replace values")
             )
@@ -396,14 +396,7 @@ impl Lexer {
             number.pop();
         }
 
-        self.push(match number.parse() {
-            Ok(n) => TokenType::Number(n),
-            Err(_) => return Err(
-                Error::err("wtf error")
-                    .label(self.token_start..self.actual_pos, "what did you do")
-                    .help("stop")
-            )
-        });
+        self.push(TokenType::Number(number.parse().unwrap()));
         Ok(())
     }
     

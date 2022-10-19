@@ -184,6 +184,6 @@ enum_modes! {
 
 #[derive(Debug)]
 pub enum ParsedFragment {
-    Expr(VNode),
+    Expr(Node),
     Literal(String),
 }
