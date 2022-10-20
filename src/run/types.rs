@@ -3,15 +3,15 @@ use std::ops::{Index, IndexMut};
 use crate::{compile::instructions::*, util::Pos};
 
 #[derive(Debug)]
-pub struct Stack(pub Vec<Value>);
+pub struct Stack<T: PartialEq>(pub Vec<T>);
 
-impl Stack {
+impl<T: PartialEq> Stack<T> {
     pub fn new() -> Self {
         Self(Vec::new())
     }
 
-    pub fn push(&mut self, value: Value) -> usize {
-        match self.0.iter().position(|v| !matches!(v.data, ValueType::List(_)) && v.data == value.data) {
+    pub fn push(&mut self, value: T) -> usize {
+        match self.0.iter().position(|v| *v == value) {
             Some(id) => id,
             None => {
                 self.0.push(value);
@@ -21,14 +21,14 @@ impl Stack {
     }
 }
 
-impl Index<usize> for Stack {
-    type Output = Value;
+impl<T: PartialEq> Index<usize> for Stack<T> {
+    type Output = T;
     fn index(&self, index: usize) -> &Self::Output {
         &self.0[index]
     }
 }
 
-impl IndexMut<usize> for Stack {
+impl<T: PartialEq> IndexMut<usize> for Stack<T> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.0[index]
     }

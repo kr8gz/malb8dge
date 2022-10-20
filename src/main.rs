@@ -39,9 +39,7 @@ fn main() {
     };
 
     macro_rules! handle {
-        ( $expr:expr ) => {
-            $expr.unwrap_or_else(|e| e.eprint(&file))
-        }
+        ( $expr:expr ) => { $expr.unwrap_or_else(|e| e.eprint()) }
     }
     
     let mut lexer = Lexer::from_file(&file);

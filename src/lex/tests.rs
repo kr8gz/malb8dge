@@ -1,7 +1,5 @@
 use super::{lexer::*, tokens::*};
 
-const FILENAME: &str = "<test>.mlb8";
-
 macro_rules! token_test {
     {
         $name:ident
@@ -31,7 +29,7 @@ macro_rules! lex {
     ( $code:expr, $offset:expr ) => {
         {
             let mut lexer = Lexer::from_str($code.into(), $offset);
-            lexer.lex().unwrap_or_else(|e| e.eprint(FILENAME));
+            lexer.lex().unwrap_or_else(|e| e.eprint());
             lexer
         }
     }

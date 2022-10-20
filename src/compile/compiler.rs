@@ -6,7 +6,7 @@ use super::instructions::*;
 
 #[derive(Debug)]
 pub struct Compiler {
-    pub constants: Stack,
+    pub constants: Stack<ValueType>,
     pub functions: Vec<Function>,
     pub scopes: Vec<Scope>,
     pub var_count: usize,
@@ -42,7 +42,7 @@ impl Compiler {
     }
 
     fn push_const(&mut self, constant: ValueType, pos: &Pos, func: usize) {
-        let id = self.constants.push(constant.into_value(pos));
+        let id = self.constants.push(constant);
         self.push_instr(Instruction::LoadConst(id), pos, func);
     }
 

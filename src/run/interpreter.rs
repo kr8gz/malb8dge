@@ -15,9 +15,9 @@ use crate::{
 use super::types::*;
 
 pub struct Interpreter {
-    constants: Vec<Value>,
+    constants: Vec<ValueType>,
     functions: Vec<Function>,
-    memory: Stack,
+    memory: Stack<Value>,
 
     vars: Vec<Option<usize>>,
     stack: Vec<usize>,
@@ -115,7 +115,7 @@ impl Interpreter {
                     {
                         let value = $value; // most confusing error ever lmao
                         let id = self.memory.push(value);
-                        self.stack.push(id);
+                        push!(Id, id);
                         id
                     }
                 };
@@ -139,22 +139,24 @@ impl Interpreter {
                 };
             }
 
-            macro_rules! data {
+            macro_rules! value {
                 ( StackTop ) => {
-                    data!(Ref, *self.stack.last().unwrap())
+                    value!(*self.stack.last().unwrap())
                 };
 
-                ( Ref, $id:expr ) => {
+                ( $id:expr ) => {
                     &self.memory[$id].data
                 };
+            }
 
-                ( Clone, $id:expr ) => {
-                    if let ValueType::List(list) = data!(Ref, $id) {
+            macro_rules! clone {
+                ( $id:expr ) => {
+                    if let ValueType::List(list) = value!($id) {
                         push!(List, list.clone())
                     } else {
                         $id
                     }
-                };
+                }
             }
 
             macro_rules! unary_ops {
@@ -213,7 +215,7 @@ impl Interpreter {
             #[allow(unused_parens)] // I HATE RUST ANALYZER
             match instr.data {
                 Instruction::LoadConst(id) => {
-                    push!(Value, self.constants[id].clone());
+                    push!(Value, self.constants[id].clone().into_value(&instr.pos));
                 }
 
                 Instruction::LoadVar(id) => {
@@ -273,7 +275,7 @@ impl Interpreter {
                                     .nth(index as usize)
                                     .map(|(pos, ch)| pos..pos + ch.len_utf8())
                                     .unwrap(),
-                                &self.to_string(data!(Ref, value_id)),
+                                &self.to_string(value!(value_id)),
                             );
                         }
 
@@ -349,7 +351,7 @@ impl Interpreter {
                         }
 
                         "@" {
-                            % convert (Boolean(_) | Null()) => String(self.repr_string(data!(Ref, target_id)));
+                            % convert (Boolean(_) | Null()) => String(self.repr_string(value!(target_id)));
 
                             String(a)   => String(a.reverse());
                             List(mut a) => List({ a.reverse(); a });
@@ -396,7 +398,7 @@ impl Interpreter {
                         }
 
                         "_" {
-                            % convert (Boolean(_) | Null()) => String(self.to_string(data!(Ref, target_id)));
+                            % convert (Boolean(_) | Null()) => String(self.to_string(value!(target_id)));
 
                             String(a)   =>  Number(a.len() as f64);
                             List(a)     =>  Number(a.len() as f64);
@@ -584,8 +586,8 @@ impl Interpreter {
                             String(a),  String(b)   =>  String(a + &b);
                             String(a),  List(b)     =>  String(a + &self.join_list(&b, ""));
 
-                            String(a),  _           =>  String(a + &self.to_string(data!(Ref, b_id)));
-                            _,          String(b)   =>  String(self.to_string(data!(Ref, a_id)) + &b);
+                            String(a),  _           =>  String(a + &self.to_string(value!(b_id)));
+                            _,          String(b)   =>  String(self.to_string(value!(a_id)) + &b);
 
                             % both ways
                             List(a),    _           =>  List(a.into_iter().chain([b_id]).collect());
@@ -651,7 +653,7 @@ impl Interpreter {
                             List(a),    Number(b)   =>  List({
                                                             let mut res = Vec::new();
                                                             for _ in 0..b.abs() as usize {
-                                                                res.extend(a.iter().map(|&id| data!(Clone, id)));
+                                                                res.extend(a.iter().map(|&id| clone!(id)));
                                                             }
                                                             if b < 0.0 { res.reverse(); }
                                                             res
@@ -705,7 +707,7 @@ impl Interpreter {
                             Number(a),  Number(b)   =>  Number(a.powf(b));
                             List(a),    List(b)     =>  List(set_helper!(a, b).filter(|id| a.contains(id) != b.contains(id)).collect());
                             
-                            List(a),    String(b)   =>  String(a.into_iter().map(|id| self.to_string(data!(Ref, id))).join(&b));
+                            List(a),    String(b)   =>  String(a.into_iter().map(|id| self.to_string(value!(id))).join(&b));
                             String(a),  String(b)   =>  String(a.chars().map(|c| c.to_string()).intersperse(b).collect());
                         }
 
@@ -776,7 +778,7 @@ impl Interpreter {
                 Instruction::Print(ref mode) => {
                     use PrintMode::*;
 
-                    let data = data!(StackTop);
+                    let data = value!(StackTop);
                     match data {
                         ValueType::List(list) => {
                             match mode {

@@ -1,6 +1,7 @@
 use ariadne::*;
+use regex::Regex;
 
-use std::{fs, process};
+use std::{env, fs, process};
 
 use super::Pos;
 
@@ -18,9 +19,9 @@ impl ColorGenerator {
         let x = (self.hue / 120.0).fract();
 
         let high = 1.0;
-        let more = 0.5 + x;
-        let less = 0.5 + 1.0 - x;
-        let low = 0.5;
+        let low = 0.6;
+        let more = low + x;
+        let less = low + 1.0 - x;
 
         let (r, g, b) = {
             if (0.0..60.0).contains(&self.hue) {
@@ -50,7 +51,7 @@ impl ColorGenerator {
 }
 
 fn replace_color(text: String, color: Color) -> String {
-    let re = regex::Regex::new("#(?P<inner>[^#]*)#").unwrap();
+    let re = Regex::new("#(?P<inner>[^#]*)#").unwrap();
     re.replace_all(&text, "$inner".fg(color).to_string()).to_string()
 }
 
@@ -94,7 +95,8 @@ impl Error {
         self
     }
 
-    pub fn print(self, file: &str) {
+    pub fn print(self) {
+        let file = &env::args().nth(1).unwrap(); // if file arg is missing it will fail in main.rs
         let mut colgen = ColorGenerator::new(self.labels.len());
 
         let mut report = Report::build(
@@ -145,8 +147,8 @@ impl Error {
             .unwrap();
     }
 
-    pub fn eprint(self, file: &str) -> ! {
-        self.print(file);
+    pub fn eprint(self) -> ! {
+        self.print();
         process::exit(1);
     }
 }

@@ -219,7 +219,7 @@ impl Parser {
             TokenType::Number(num) => {
                 let peek = self.peek().value;
                 if
-                    peek.is("(") || peek.is("[") || peek.is("{") ||
+                    peek.is("(") || peek.is("[") ||
                     peek.is("_") || peek.is("$") ||
                     matches!(peek, TokenType::String(_) | TokenType::Identifier(_))
                 {
