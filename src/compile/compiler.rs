@@ -37,6 +37,21 @@ impl Compiler {
         }
     }
 
+    fn is_const_instr(&self, func: usize, index: usize) -> bool {
+        matches!(self.functions[func].instructions[index].data, Instruction::LoadConst(_))
+    }
+
+    fn pop_const_instr(&mut self, func: usize, index: usize) -> Option<ValueType> {
+        let instrs = &mut self.functions[func].instructions;
+        match instrs[index].data {
+            Instruction::LoadConst(c) => {
+                instrs.remove(index);
+                Some(self.constants.0.remove(c))
+            }
+            _ => None
+        }
+    }
+
     fn curr_index(&self, func: usize) -> usize {
         self.functions[func].instructions.len()
     }
@@ -87,7 +102,7 @@ impl Compiler {
         id
     }
 
-    pub fn compile(&mut self, statements: Vec<Node>) -> Result<()> {
+    pub fn compile(&mut self, mut statements: Vec<Node>) -> Result<()> {
         self.scopes.push(Scope {
             vars: HashMap::new(),
             parent: None,
@@ -95,8 +110,15 @@ impl Compiler {
         });
         self.functions.push(Function::new(Vec::new()));
 
-        for statement in statements {
-            self.compile_node(statement, false, 0, 0)?;
+        if let Some(last) = statements.pop() {
+            for stmt in statements {
+                self.compile_node(stmt, false, 0, 0)?;
+            }
+
+            let last_pos = last.pos.clone();
+            self.compile_node(last, true, 0, 0)?;
+            self.push_instr(Instruction::Print(PrintMode::Default), &last_pos, 0);
+            self.push_instr(Instruction::PopOne, &last_pos, 0);
         }
         Ok(())
     }
@@ -105,9 +127,9 @@ impl Compiler {
         let Node { data, ref pos } = node;
 
         match data {
-            NodeType::Statements(mut stmts) => {
-                if let Some(last) = stmts.pop() {
-                    for stmt in stmts {
+            NodeType::Statements(mut statements) => {
+                if let Some(last) = statements.pop() {
+                    for stmt in statements {
                         self.compile_node(stmt, false, scope, func)?;
                     }
                     self.compile_node(last, true, scope, func)?;
@@ -239,10 +261,18 @@ impl Compiler {
             },
 
             NodeType::BinOp { a, op, b } => {
-                // TODO if const args then run op at compile time
                 self.compile_node(*a, true, scope, func)?;
                 self.compile_node(*b, true, scope, func)?;
-                self.push_instr(Instruction::BinaryOp(op), pos, func);
+
+                // let curr = self.curr_index(func);
+                // if self.is_const_instr(func, curr - 1) && self.is_const_instr(func, curr - 2) {
+                //     let rhs = self.pop_const_instr(func, curr - 2).unwrap();
+                //     let lhs = self.pop_const_instr(func, curr - 1).unwrap();
+
+                //     operators::run_bin_op(memory, pos, lhs, rhs, op);
+                // } else {
+                    self.push_instr(Instruction::BinaryOp(op), pos, func);
+                // }
             },
 
             NodeType::Compare { first, chain } => {
@@ -339,21 +369,19 @@ impl Compiler {
                 }
             }
 
-            NodeType::Group(inner) => {
-                self.compile_node(*inner, true, scope, func)?;
-            }
+            NodeType::Group(node) => self.compile_node(*node, true, scope, func)?,
 
             NodeType::List(list) => {
                 let len = list.len();
-                for el in list {
-                    self.compile_node(el, true, scope, func)?;
+                for node in list {
+                    self.compile_node(node, true, scope, func)?;
                 }
                 self.push_instr(Instruction::BuildList(len), pos, func);
             }
 
-            NodeType::Variable(var) => {
-                self.compile_variable(&var, pos, scope, func)?;
-            },
+            NodeType::Variable(name) => {
+                self.compile_variable(&name, pos, scope, func)?;
+            }
 
             NodeType::String(frags) => {
                 let concatenations = frags.len() - 1;
@@ -361,10 +389,7 @@ impl Compiler {
                 for frag in frags {
                     match frag {
                         ParsedFragment::Literal(lit) => self.push_const(ValueType::String(lit), pos, func),
-                        ParsedFragment::Expr(expr) => {
-                            self.compile_node(expr, true, scope, func)?;
-                            self.push_op(OpType::After, "`", pos, func);
-                        },
+                        ParsedFragment::Expr(node) => self.compile_node(node, true, scope, func)?,
                     }
                 }
 
@@ -381,7 +406,6 @@ impl Compiler {
         if !is_expr {
             self.push_instr(Instruction::PopOne, pos, func);
         }
-
         Ok(())
     }
 
@@ -399,7 +423,6 @@ impl Compiler {
                 self.push_instr(Instruction::LoadVar(id), pos, func);
                 Ok(id)
             }
-
             None => Err(
                 Error::err("Use of undefined variable")
                     .label(pos.clone(), format!("Couldn't find variable #{name}# in this scope"))

@@ -1,6 +1,14 @@
+#![allow(unstable_name_collisions)] // i just want to use intersperse
+
 use std::env;
 
-use crate::{lex::lexer::Lexer, compile::compiler::Compiler, parse::parser::Parser, run::interpreter::Interpreter};
+use crate::{
+    lex::lexer::Lexer,
+    compile::compiler::Compiler,
+    parse::parser::Parser,
+    run::interpreter::Interpreter,
+    util::errors::Error,
+};
 
 mod util;
 
@@ -13,7 +21,7 @@ fn main() {
     let mut args = env::args();
     args.next(); // first arg is the location of the .exe
 
-    let file = args.next().unwrap_or_else(|| util::errors::simple("Missing required argument: filename".into()));
+    let file = args.next().unwrap_or_else(|| Error::simple("Missing required argument: filename".into()));
 
     macro_rules! parse_args {
         ( $( $var:ident: $arg:literal, )* ) => {
@@ -23,11 +31,11 @@ fn main() {
                 match arg.as_str() {
                     $(
                         $arg => {
-                            if $var { util::errors::simple(format!("Duplicate argument '{arg}'")); }
+                            if $var { Error::simple(format!("Duplicate argument '{arg}'")); }
                             $var = true;
                         }
                     )*
-                    _ => util::errors::simple(format!("Invalid argument '{arg}'"))
+                    _ => Error::simple(format!("Invalid argument '{arg}'"))
                 }
             }
         }
@@ -35,6 +43,10 @@ fn main() {
 
     parse_args! {
         debug: "-d",
+        debug_lexer: "-dl",
+        debug_parser: "-dp",
+        debug_compiler: "-dc",
+        debug_interpreter: "-di",
         warnings: "-w",
     };
 
@@ -44,15 +56,17 @@ fn main() {
     
     let mut lexer = Lexer::from_file(&file);
     handle!(lexer.lex());
-    if debug { println!("{:#?}", &lexer); }
+    if debug || debug_lexer { println!("{:#?}", &lexer); }
     
     let mut parser = Parser::new(lexer);
     handle!(parser.parse());
-    if debug { println!("{:#?}", &parser); }
+    if debug || debug_parser { println!("{:#?}", &parser); }
     
     let mut compiler = Compiler::new();
     handle!(compiler.compile(parser.statements));
-    if debug { println!("{:#?}", &compiler); }
+    if debug || debug_compiler { println!("{:#?}", &compiler); }
     
-    handle!(Interpreter::run(compiler));
+    let mut interpreter = Interpreter::new(compiler);
+    handle!(interpreter.run());
+    if debug || debug_interpreter { println!("{:#?}", &interpreter); }
 }

@@ -65,6 +65,11 @@ pub struct Error {
 }
 
 impl Error {
+    pub fn simple(msg: String) -> ! {
+        eprintln!("{} {msg}", "Error:".fg(Color::Red));
+        process::exit(1)
+    }
+
     pub fn err(msg: impl ToString) -> Self {
         Error::new(msg, ReportKind::Error)
     }
@@ -151,9 +156,4 @@ impl Error {
         self.print();
         process::exit(1);
     }
-}
-
-pub fn simple(msg: String) -> ! {
-    eprintln!("{} {msg}", "Error:".fg(Color::Red));
-    process::exit(1)
 }

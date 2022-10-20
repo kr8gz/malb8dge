@@ -1,7 +1,7 @@
 use std::fs;
 
 use crate::fmt_plural;
-use crate::util::{*, errors::{self, Error}, operators::{self, OpType::*}};
+use crate::util::{*, errors::Error, operators::{self, OpType::*}};
 
 use super::tokens::*;
 
@@ -28,7 +28,7 @@ pub struct Lexer {
 impl Lexer {
     pub fn from_file(file: &str) -> Self {
         let code = fs::read_to_string(file).unwrap_or_else(|err| {
-            errors::simple(err.to_string())
+            Error::simple(err.to_string())
         });
 
         Self::from_str(code, 0)
