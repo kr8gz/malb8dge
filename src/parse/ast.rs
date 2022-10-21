@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::{lex::tokens::*, util::*};
+use crate::{lex::tokens::*, util::{*, operators::OpType}};
 
 type BNode = Box<Node>;
 type ONode = Box<Option<Node>>;
@@ -26,9 +26,8 @@ pub enum NodeType {
     While { cond: BNode, mode: IterMode, block: BNode },            // x ~        [mode] ? ... // x ~          [mode] [ ... ] //
     Loop { mode: IterMode, block: BNode },                          //                   ? ... //            ? [mode] { ... } //
     Function { args: VNode, block: BNode },
-    BeforeOp { target: BNode, op: usize }, // op: usize = op id
-    AfterOp { target: BNode, op: usize }, // op: usize = op id
-    BinOp { a: BNode, op: usize, b: BNode },
+    UnaryOp { target: BNode, op_type: OpType, op: String },
+    BinOp { a: BNode, op: String, b: BNode },
     Compare { first: BNode, chain: Vec<(String, BNode)> },
     Increment { target: BNode, mode: IncrMode },
     FnCall { target: BNode, args: VNode },
@@ -64,7 +63,7 @@ impl Display for NodeType {
             Self::While { .. } => "while loop".into(),
             Self::Loop { .. } => "loop".into(),
             Self::Function { .. } => "function definition".into(),
-            Self::BeforeOp { .. } | Self::AfterOp { .. } | Self::BinOp { .. } => "expression".into(),
+            Self::UnaryOp { .. } | Self::BinOp { .. } => "expression".into(),
             Self::Increment { .. } => "incrementation".into(),
             Self::Compare { .. } => "comparison".into(),
             Self::FnCall { .. } => "function call".into(),

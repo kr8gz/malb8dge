@@ -229,7 +229,7 @@ impl Parser {
                                 data: NodeType::Number(num),
                                 pos: pos.clone(),
                             }),
-                            op: op_id(Binary, "*"),
+                            op: "*".into(),
                             b: Box::new(self.parse_atom(false)?.unwrap()),
                         },
                         pos: pos.start..self.pos_end(),
@@ -349,8 +349,9 @@ impl Parser {
 
                 "&" | "~" => NodeType::Variable(sym.into()),
 
-                op if operators::is_op(Before, op) => NodeType::BeforeOp {
-                    op: operators::op_id(Before, op),
+                op if operators::is_op(Before, op) => NodeType::UnaryOp {
+                    op: op.into(),
+                    op_type: Before,
                     target: Box::new(self.parse_operation(operators::op_prec(Before, op), false)?.unwrap()),
                 },
 
@@ -654,7 +655,7 @@ impl Parser {
                     pos: a.pos.start..self.pos_end(),
                     data: NodeType::BinOp {
                         a: Box::new(a),
-                        op: operators::op_id(op_type, &op),
+                        op,
                         b: Box::new(b),
                     },
                 };
@@ -954,8 +955,9 @@ impl Parser {
                         }
                     },
 
-                    op if operators::is_op(After, op) => NodeType::AfterOp {
-                        op: operators::op_id(After, op),
+                    op if operators::is_op(After, op) => NodeType::UnaryOp {
+                        op: op.into(),
+                        op_type: After,
                         target: Box::new(parsed_value),
                     },
 

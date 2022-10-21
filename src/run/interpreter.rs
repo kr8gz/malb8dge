@@ -12,9 +12,8 @@ use super::types::*;
 
 #[derive(Debug)]
 pub struct Interpreter {
-    constants: Vec<ValueType>,
+    memory: Stack,
     functions: Vec<Function>,
-    memory: Stack<Value>,
 
     vars: Vec<Option<usize>>,
     stack: Vec<usize>,
@@ -24,9 +23,8 @@ pub struct Interpreter {
 impl Interpreter {
     pub fn new(compiler: Compiler) -> Self {
         Self {
-            constants: compiler.constants.0,
+            memory: compiler.constants,
             functions: compiler.functions,
-            memory: Stack::new(),
 
             vars: vec![None; compiler.var_count],
             stack: Vec::new(),
@@ -101,20 +99,14 @@ impl Interpreter {
                 ( Operand ) => {
                     {
                         let id = pop!(Id);
-                        let cloned = self.memory[id].clone();
-                        Operand {
-                            id,
-                            type_name: cloned.type_name(),
-                            data: cloned.data,
-                            pos: cloned.pos,
-                        }
+                        self.memory.get_operand(id)
                     }
                 };
             }
 
             match instr.data {
                 Instruction::LoadConst(id) => {
-                    push!(self.constants[id].clone());
+                    push!(Id, id);
                 }
 
                 Instruction::LoadVar(id) => {

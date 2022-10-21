@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
-use crate::{parse::ast::*, util::{*, errors::Error, operators::{self, OpType}, Pos}, run::types::*};
+use crate::{parse::ast::*, util::{*, errors::Error, operators::{self, *}, Pos}, run::types::*};
 
 use super::instructions::*;
 
 #[derive(Debug)]
 pub struct Compiler {
-    pub constants: Stack<ValueType>,
+    pub constants: Stack,
     pub functions: Vec<Function>,
     pub scopes: Vec<Scope>,
     pub var_count: usize,
@@ -37,27 +37,12 @@ impl Compiler {
         }
     }
 
-    fn is_const_instr(&self, func: usize, index: usize) -> bool {
-        matches!(self.functions[func].instructions[index].data, Instruction::LoadConst(_))
-    }
-
-    fn pop_const_instr(&mut self, func: usize, index: usize) -> Option<ValueType> {
-        let instrs = &mut self.functions[func].instructions;
-        match instrs[index].data {
-            Instruction::LoadConst(c) => {
-                instrs.remove(index);
-                Some(self.constants.0.remove(c))
-            }
-            _ => None
-        }
-    }
-
     fn curr_index(&self, func: usize) -> usize {
         self.functions[func].instructions.len()
     }
 
     fn push_const(&mut self, constant: ValueType, pos: &Pos, func: usize) {
-        let id = self.constants.push(constant);
+        let id = self.constants.push(constant.into_value(pos));
         self.push_instr(Instruction::LoadConst(id), pos, func);
     }
 
@@ -121,6 +106,29 @@ impl Compiler {
             self.push_instr(Instruction::PopOne, &last_pos, 0);
         }
         Ok(())
+    }
+
+                                                // indices from high to low
+    fn compile_if_const<F>(&mut self, func: usize, indices: &[usize], f: F) -> Result<bool>
+    where
+        F: Fn(&mut Compiler, &[usize]) -> Result<()>
+    {
+        let consts = indices.iter()
+            .filter_map(|&index| {
+                match self.functions[func].instructions[index].data {
+                    Instruction::LoadConst(c) => Some(c),
+                    _ => None
+                }
+            }).collect::<Vec<_>>();
+
+        let ok = consts.len() == indices.len();
+        if ok {
+            for &index in indices {
+                self.functions[func].instructions.remove(index);
+            }
+            f(self, &consts)?
+        }
+        Ok(ok)
     }
 
     fn compile_node(&mut self, node: Node, is_expr: bool, scope: usize, func: usize) -> Result<()> {
@@ -248,31 +256,38 @@ impl Compiler {
                 todo!("function {args:?}, {block:?}")
             }
 
-            NodeType::BeforeOp { target, op } => {
-                // TODO if const args then run op at compile time
+            NodeType::UnaryOp { target, op_type, op } => {
                 self.compile_node(*target, true, scope, func)?;
-                self.push_instr(Instruction::BeforeOp(op), pos, func);
-            },
 
-            NodeType::AfterOp { target, op } => {
-                // TODO if const args then run op at compile time
-                self.compile_node(*target, true, scope, func)?;
-                self.push_instr(Instruction::AfterOp(op), pos, func);
+                let curr = self.curr_index(func);
+                let is_const = self.compile_if_const(func, &[curr - 1], |s, consts| {
+                    let target = s.constants.get_operand(consts[0]);
+                    let result = operators::run_unary_op(&mut s.constants, pos, target, op_type, &op)?;
+                    s.push_const(result, pos, func);
+                    Ok(())
+                })?;
+
+                if !is_const {
+                    self.push_instr(Instruction::AfterOp(operators::op_id(op_type, &op)), pos, func);
+                }
             },
 
             NodeType::BinOp { a, op, b } => {
                 self.compile_node(*a, true, scope, func)?;
                 self.compile_node(*b, true, scope, func)?;
 
-                // let curr = self.curr_index(func);
-                // if self.is_const_instr(func, curr - 1) && self.is_const_instr(func, curr - 2) {
-                //     let rhs = self.pop_const_instr(func, curr - 2).unwrap();
-                //     let lhs = self.pop_const_instr(func, curr - 1).unwrap();
+                let curr = self.curr_index(func);
+                let is_const = self.compile_if_const(func, &[curr - 1, curr - 2], |s, consts| {
+                    let lhs = s.constants.get_operand(consts[1]);
+                    let rhs = s.constants.get_operand(consts[0]);
+                    let result = operators::run_bin_op(&mut s.constants, pos, lhs, rhs, &op)?;
+                    s.push_const(result, pos, func);
+                    Ok(())
+                })?;
 
-                //     operators::run_bin_op(memory, pos, lhs, rhs, op);
-                // } else {
-                    self.push_instr(Instruction::BinaryOp(op), pos, func);
-                // }
+                if !is_const {
+                    self.push_instr(Instruction::BinaryOp(operators::op_id(OpType::Binary, &op)), pos, func);
+                }
             },
 
             NodeType::Compare { first, chain } => {
@@ -372,6 +387,7 @@ impl Compiler {
             NodeType::Group(node) => self.compile_node(*node, true, scope, func)?,
 
             NodeType::List(list) => {
+                // TODO const lists
                 let len = list.len();
                 for node in list {
                     self.compile_node(node, true, scope, func)?;

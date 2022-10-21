@@ -124,7 +124,7 @@ pub struct Operand {
     pub type_name: String,
 }
 
-pub fn run_unary_op(memory: &mut Stack<Value>, pos: &Pos, mut target: Operand, op_type: OpType, op: &str) -> Result<ValueType> {
+pub fn run_unary_op(memory: &mut Stack, pos: &Pos, mut target: Operand, op_type: OpType, op: &str) -> Result<ValueType> {
     use ValueType::*;
     crate::memory_helper_macros!(memory, pos);
             
@@ -170,7 +170,7 @@ pub fn run_unary_op(memory: &mut Stack<Value>, pos: &Pos, mut target: Operand, o
                         }
                     }
                 )*
-                _ => panic!("no implementation found for {repr}")
+                _ => unimplemented!("{repr}")
             }
         }
     }
@@ -299,7 +299,7 @@ pub fn run_unary_op(memory: &mut Stack<Value>, pos: &Pos, mut target: Operand, o
     Ok(ret)
 }
 
-pub fn run_bin_op(memory: &mut Stack<Value>, pos: &Pos, mut lhs: Operand, mut rhs: Operand, op: &str) -> Result<ValueType> {
+pub fn run_bin_op(memory: &mut Stack, pos: &Pos, mut lhs: Operand, mut rhs: Operand, op: &str) -> Result<ValueType> {
     use ValueType::*;
     crate::memory_helper_macros!(memory, pos);
     
@@ -367,7 +367,7 @@ pub fn run_bin_op(memory: &mut Stack<Value>, pos: &Pos, mut lhs: Operand, mut rh
                         }
                     }
                 )*
-                _ => panic!("no implementation found for a {op} b")
+                _ => unimplemented!("a {op} b")
             }
         }
     }
