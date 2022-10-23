@@ -135,7 +135,7 @@ token_test! {
     
     "\"Hello World!\""
 
-    TokenType::String(vec![
+    TokenType::FragmentString(vec![
         LexedFragment::Literal("Hello World!".into())
     ]), 0..14
 }
@@ -145,7 +145,7 @@ token_test! {
 
     "\"Hello {world}!\""
 
-    TokenType::String(vec![
+    TokenType::FragmentString(vec![
         LexedFragment::Literal("Hello ".into()),
         LexedFragment::Expr(lex!("world", 8)),
         LexedFragment::Literal("!".into()),
@@ -157,7 +157,7 @@ token_test! {
 
     "\"There {apples == 1 ? \"is 1 apple\" ! \"are {apples} apples\"}!\"  ### nesting"
 
-    TokenType::String(vec![
+    TokenType::FragmentString(vec![
         LexedFragment::Literal("There ".into()),
         LexedFragment::Expr(lex!("apples == 1 ? \"is 1 apple\" ! \"are {apples} apples\"", 8)),
         LexedFragment::Literal("!".into()),
@@ -169,7 +169,7 @@ token_test! {
 
     "\"[\\n, \\t, \\\", \\\\, \\{, \\}, \\invalid]\""
 
-    TokenType::String(vec![
+    TokenType::FragmentString(vec![
         LexedFragment::Literal("[\n, \t, \", \\, {, }, \\invalid]".into())
     ]), 0..36
 }

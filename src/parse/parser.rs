@@ -2,7 +2,7 @@ use std::fmt;
 
 use ariadne::{Fmt, Color::*};
 
-use crate::{parse::ast::*, util::{*, errors::*, operators::{self, *, OpType::*}}, lex::{lexer::*, tokens::*}};
+use crate::{parse::ast::*, util::{*, errors::*, operators::{self, *, OpType::*}}, lex::{lexer::*, tokens::*}, run::types::ValueType};
 
 #[derive(Debug)]
 pub struct Parser {
@@ -10,6 +10,7 @@ pub struct Parser {
     pub tokens: Vec<Token>,
 
     pub statements: Vec<Node>,
+    pub functions: Vec<Function>,
 
     token_index: usize,
 
@@ -27,6 +28,7 @@ impl Parser {
             tokens: lexer.tokens,
 
             statements: Vec::new(),
+            functions: Vec::new(),
 
             token_index: 0,
 
@@ -81,9 +83,7 @@ impl Parser {
                     .collect::<Result<_>>()?
             ),
 
-            ind @ NodeType::Index { .. } => ind,
-
-            NodeType::Variable(var) if var != "&" && var != "~" => NodeType::Variable(var),
+            ok @ (NodeType::Variable(_) | NodeType::Index { .. }) => ok,
             
             _ => return Err(
                 Error::err("Syntax error")
@@ -221,12 +221,12 @@ impl Parser {
                 if
                     peek.is("(") || peek.is("[") ||
                     peek.is("_") || peek.is("$") ||
-                    matches!(peek, TokenType::String(_) | TokenType::Identifier(_))
+                    matches!(peek, TokenType::FragmentString(_) | TokenType::Identifier(_))
                 {
                     NodeType::Group(Box::new(Node {
                         data: NodeType::BinOp {
                             a: Box::new(Node {
-                                data: NodeType::Number(num),
+                                data: NodeType::Literal(ValueType::Number(num)),
                                 pos: pos.clone(),
                             }),
                             op: "*".into(),
@@ -235,23 +235,25 @@ impl Parser {
                         pos: pos.start..self.pos_end(),
                     }))
                 } else {
-                    NodeType::Number(num)
+                    NodeType::Literal(ValueType::Number(num))
                 }
             },
 
             TokenType::Identifier(id) => {
                 match id.as_str() {
-                    "true" | "false" => NodeType::Boolean(id.parse().unwrap()),
-                    "null" => NodeType::Null,
+                    "true" | "false" => NodeType::Literal(ValueType::Boolean(id.parse().unwrap())),
+                    "null" => NodeType::Literal(ValueType::Null()),
                     _ => NodeType::Variable(id),
                 }
             },
 
-            TokenType::String(st) => NodeType::String(
+            TokenType::FragmentString(st) => NodeType::FragmentString(
                 st.into_iter()
                     .map(|f| self.parse_fragment(f))
                     .collect::<Result<_>>()?
             ),
+
+            TokenType::String(st) => NodeType::Literal(ValueType::String(st)),
 
             TokenType::Symbol(ref sym) => match sym.as_str() {
                 "(" => {
@@ -305,7 +307,7 @@ impl Parser {
                             pos: start..self.pos_end(),
                             data: {
                                 if list.is_empty() {
-                                    NodeType::Null
+                                    NodeType::Literal(ValueType::Null())
                                 } else if list.len() > 1 || matches!(list[0].data, NodeType::List(_)) {
                                     NodeType::List(list)
                                 } else {
@@ -349,9 +351,8 @@ impl Parser {
 
                 "&" | "~" => NodeType::Variable(sym.into()),
 
-                op if operators::is_op(Before, op) => NodeType::UnaryOp {
+                op if operators::is_op(Before, op) => NodeType::BeforeOp {
                     op: op.into(),
-                    op_type: Before,
                     target: Box::new(self.parse_operation(operators::op_prec(Before, op), false)?.unwrap()),
                 },
 
@@ -422,9 +423,14 @@ impl Parser {
     }
 
     fn parse_fn_def(&mut self, args: Vec<Node>) -> Result<NodeType> {
-        Ok(NodeType::Function {
+        let block = self.with_func(|s| s.parse_statement(false))?.unwrap();
+        self.functions.push(Function {
             args: self.check_var_list(args, "function definition", "argument name")?,
-            block: Box::new(self.with_func(|s| s.parse_statement(false))?.unwrap()),
+            block,
+        });
+        
+        Ok(NodeType::Function {
+            index: self.functions.len() - 1,
         })
     }
 
@@ -955,9 +961,8 @@ impl Parser {
                         }
                     },
 
-                    op if operators::is_op(After, op) => NodeType::UnaryOp {
+                    op if operators::is_op(After, op) => NodeType::AfterOp {
                         op: op.into(),
-                        op_type: After,
                         target: Box::new(parsed_value),
                     },
 

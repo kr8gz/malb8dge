@@ -16,7 +16,8 @@ pub enum TokenType {
     Identifier(String),
     Replace(ReplaceData<Vec<LexedFragment>>),
     CharReplace(ReplaceData<char>),
-    String(Vec<LexedFragment>),
+    FragmentString(Vec<LexedFragment>),
+    String(String),
     Number(f64),
     Symbol(String),
     Eof,
@@ -37,7 +38,7 @@ impl Display for TokenType {
         write!(f, "{}", match self {
             Self::Identifier(_) => "identifier".into(),
             Self::Replace(_) | Self::CharReplace(_) => "replace expression".into(),
-            Self::String(_) => "string".into(),
+            Self::FragmentString(_) | Self::String(_) => "string".into(),
             Self::Number(_) => "number".into(),
             Self::Symbol(sym) => match sym.as_str() {
                 "\n" => "newline".into(),

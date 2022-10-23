@@ -1,6 +1,50 @@
+use std::ops::{Index, IndexMut};
+
 use itertools::Itertools;
 
-use crate::util::Pos;
+use crate::{compile::instructions::*, util::{Pos, operators::Operand}};
+
+#[derive(Debug)]
+pub struct Stack(pub Vec<Value>);
+
+impl Stack {
+    pub fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    pub fn push(&mut self, value: Value) -> usize {
+        match self.0.iter().position(|v| *v == value) {
+            Some(id) => id,
+            None => {
+                self.0.push(value);
+                self.0.len() - 1
+            }
+        }
+    }
+
+    pub fn get_operand(&self, id: usize) -> Operand {
+        let cloned = self[id].clone();
+        Operand {
+            id,
+            type_name: cloned.type_name(),
+            data: cloned.data,
+            pos: cloned.pos,
+        }
+    }
+}
+
+impl Index<usize> for Stack {
+    type Output = Value;
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
+    }
+}
+
+impl IndexMut<usize> for Stack {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.0[index]
+    }
+}
 
 pub trait RemoveElement<T: PartialEq> {
     fn remove_element(&mut self, element: &T);
@@ -24,30 +68,6 @@ impl Value {
     pub fn type_name(&self) -> String {
         self.data.type_name()
     }
-
-    pub fn as_int(&self) -> Option<f64> {
-        self.data.as_int()
-    }
-
-    pub fn as_num(&self) -> Option<f64> {
-        self.data.as_num()
-    }
-
-    pub fn as_bool(&self) -> bool {
-        self.data.as_bool()
-    }
-
-    pub fn as_string(&self) -> String {
-        self.data.as_string()
-    }
-
-    pub fn as_repr_string(&self) -> String {
-        self.data.as_repr_string()
-    }
-
-    pub fn as_joined_list_string(&self, sep: &str) -> String {
-        self.data.as_joined_list_string(sep)
-    }
 }
 
 macro_rules! types {
@@ -70,8 +90,8 @@ macro_rules! types {
 }
 
 types! {
-    Function(usize),
-    List(Vec<Value>),
+    Function(Function),
+    List(Vec<usize>),
     String(String),
     Number(f64),
     Boolean(bool),
@@ -112,11 +132,11 @@ impl ValueType {
         }
     }
 
-    pub fn as_string(&self) -> String {
+    pub fn as_string(&self, memory: &Stack) -> String {
         match self {
             Self::Function(_) => "<function>".into(),
             Self::List(list) => {
-                format!("[{}]", list.iter().map(|v| v.data.as_repr_string()).collect::<Vec<_>>().join(", "))
+                format!("[{}]", list.iter().map(|&v| memory[v].data.as_repr_string(memory)).collect::<Vec<_>>().join(", "))
             },
             Self::Boolean(b) => b.to_string(),
             Self::String(s) => s.clone(),
@@ -125,32 +145,17 @@ impl ValueType {
         }
     }
 
-    pub fn as_repr_string(&self) -> String {
+    pub fn as_repr_string(&self, memory: &Stack) -> String {
         match self {
             Self::String(s) => format!("\"{s}\""),
             Self::Null() => "null".into(),
-            _ => self.as_string(),
+            _ => self.as_string(memory),
         }
     }
+}
 
-    pub fn as_joined_list_string(&self, sep: &str) -> String {
-        match self {
-            ValueType::List(list) => {
-                list.iter()
-                    .map(|v| v.as_string())
-                    .join(sep)
-            }
-
-            _ => {
-                let ret = self.as_string();
-                if sep.is_empty() {
-                    return ret
-                }
-                ret.chars()
-                    .map(|c| c.to_string())
-                    .intersperse(sep.into())
-                    .collect::<String>()
-            }
-        }
-    }
+pub fn join_list(list: &[usize], sep: &str, memory: &Stack) -> String {
+    list.iter()
+        .map(|&v| memory[v].data.as_string(memory))
+        .join(sep)
 }

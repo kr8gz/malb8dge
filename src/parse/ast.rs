@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::{lex::tokens::*, util::{*, operators::OpType}};
+use crate::{lex::tokens::*, util::*, run::types::ValueType};
 
 type BNode = Box<Node>;
 type ONode = Box<Option<Node>>;
@@ -25,8 +25,9 @@ pub enum NodeType {
     For { iter: BNode, vars: VNode, mode: IterMode, block: BNode }, // x ~ [vars]  mode    ... // x ~ [vars]   [mode] { ... } //
     While { cond: BNode, mode: IterMode, block: BNode },            // x ~        [mode] ? ... // x ~          [mode] [ ... ] //
     Loop { mode: IterMode, block: BNode },                          //                   ? ... //            ? [mode] { ... } //
-    Function { args: VNode, block: BNode },
-    UnaryOp { target: BNode, op_type: OpType, op: String },
+    Function { index: usize }, // see Function struct
+    BeforeOp { target: BNode, op: String },
+    AfterOp { target: BNode, op: String },
     BinOp { a: BNode, op: String, b: BNode },
     Compare { first: BNode, chain: Vec<(String, BNode)> },
     Increment { target: BNode, mode: IncrMode },
@@ -43,10 +44,8 @@ pub enum NodeType {
     Group(BNode),
     List(VNode),
     Variable(String),
-    String(Vec<ParsedFragment>),
-    Number(f64),
-    Boolean(bool),
-    Null,
+    FragmentString(Vec<ParsedFragment>),
+    Literal(ValueType),
 }
 
 impl Display for NodeType {
@@ -63,7 +62,7 @@ impl Display for NodeType {
             Self::While { .. } => "while loop".into(),
             Self::Loop { .. } => "loop".into(),
             Self::Function { .. } => "function definition".into(),
-            Self::UnaryOp { .. } | Self::BinOp { .. } => "expression".into(),
+            Self::BeforeOp { .. } | Self::AfterOp { .. } | Self::BinOp { .. } => "expression".into(),
             Self::Increment { .. } => "incrementation".into(),
             Self::Compare { .. } => "comparison".into(),
             Self::FnCall { .. } => "function call".into(),
@@ -82,12 +81,16 @@ impl Display for NodeType {
                 "~" => "loop variable".into(),
                 _ => format!("variable '{var}'")
             },
-            Self::String(_) => "string".into(),
-            Self::Number(_) => "number".into(),
-            Self::Boolean(b) => format!("keyword '{b}'"),
-            Self::Null => "keyword 'null'".into(),
+            Self::FragmentString(_) => "string".into(),
+            Self::Literal(lit) => format!("literal '{}'", lit.as_string()),
         })
     }
+}
+
+#[derive(Debug)]
+pub struct Function {
+    pub args: VNode,
+    pub block: Node,
 }
 
 #[derive(Debug)]
@@ -169,7 +172,7 @@ enum_modes! {
 
     Spaces: "/",
     NoNewline: "|",
-    NoNewlineSpaces: "/|",
+    SplitNewline: "/|",
     // Default: ";"
 }
 

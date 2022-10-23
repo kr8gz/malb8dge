@@ -4,7 +4,6 @@ use std::env;
 
 use crate::{
     lex::lexer::Lexer,
-    compile::compiler::Compiler,
     parse::parser::Parser,
     run::interpreter::Interpreter,
     util::errors::Error,
@@ -45,7 +44,6 @@ fn main() {
         debug: "-d",
         debug_lexer: "-dl",
         debug_parser: "-dp",
-        debug_compiler: "-dc",
         debug_interpreter: "-di",
         warnings: "-w",
     };
@@ -62,11 +60,7 @@ fn main() {
     handle!(parser.parse());
     if debug || debug_parser { println!("{:#?}", &parser); }
     
-    let mut compiler = Compiler::new();
-    handle!(compiler.compile(parser.statements));
-    if debug || debug_compiler { println!("{:#?}", &compiler); }
-    
-    let mut interpreter = Interpreter::new(compiler);
-    handle!(interpreter.run());
+    let mut interpreter = Interpreter::new();
+    handle!(interpreter.run(parser));
     if debug || debug_interpreter { println!("{:#?}", &interpreter); }
 }

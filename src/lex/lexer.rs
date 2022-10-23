@@ -355,12 +355,16 @@ impl Lexer {
             }
         }
 
-        fragments.push(if brace_depth > 0 {
-            self.lex_expr_frag(frag, frag_start)?
+        if fragments.is_empty() {
+            self.push(TokenType::String(frag));
         } else {
-            LexedFragment::Literal(frag)
-        });
-        self.push(TokenType::String(fragments));
+            fragments.push(if brace_depth > 0 {
+                self.lex_expr_frag(frag, frag_start)?
+            } else {
+                LexedFragment::Literal(frag)
+            });
+            self.push(TokenType::FragmentString(fragments));
+        }
         Ok(())
    }
     
