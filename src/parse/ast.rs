@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::{lex::tokens::*, util::*, run::types::ValueType};
+use crate::{lex::tokens::*, util::{*, operators::OpType}, run::types::ValueType};
 
 type BNode = Box<Node>;
 type ONode = Box<Option<Node>>;
@@ -26,8 +26,7 @@ pub enum NodeType {
     While { cond: BNode, mode: IterMode, block: BNode },            // x ~        [mode] ? ... // x ~          [mode] [ ... ] //
     Loop { mode: IterMode, block: BNode },                          //                   ? ... //            ? [mode] { ... } //
     Function { index: usize }, // see Function struct
-    BeforeOp { target: BNode, op: String },
-    AfterOp { target: BNode, op: String },
+    UnaryOp { target: BNode, op_type: OpType, op: String },
     BinOp { a: BNode, op: String, b: BNode },
     Compare { first: BNode, chain: Vec<(String, BNode)> },
     Increment { target: BNode, mode: IncrMode },
@@ -51,38 +50,34 @@ pub enum NodeType {
 impl Display for NodeType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", match self {
-            Self::Statements(_) => "block".into(),
-            Self::Return(_) => "return statement".into(),
-            Self::Break(_) => "break statement".into(),
-            Self::Continue(_) => "continue statement".into(),
-            Self::Exit(_) => "exit statement".into(),
-            Self::Assign { .. } | Self::MultipleAssign { .. } => "assignment".into(),
-            Self::If { .. } => "if expression".into(),
-            Self::For { .. } => "for loop".into(),
-            Self::While { .. } => "while loop".into(),
-            Self::Loop { .. } => "loop".into(),
-            Self::Function { .. } => "function definition".into(),
-            Self::BeforeOp { .. } | Self::AfterOp { .. } | Self::BinOp { .. } => "expression".into(),
-            Self::Increment { .. } => "incrementation".into(),
-            Self::Compare { .. } => "comparison".into(),
-            Self::FnCall { .. } => "function call".into(),
-            Self::Index { .. } => "index".into(),
-            Self::BracketIndex { .. } => "bracket indexing thing".into(),
-            Self::BracketIter { .. } => "bracket iterating thing".into(),
-            Self::Slice { .. } => "slice".into(),
-            Self::BraceIter { .. } => "brace iterating thing".into(),
-            Self::Replace { .. } | Self::CharReplace { .. } => "replace expression".into(),
-            Self::Print { .. } => "print".into(),
-            Self::Input { .. } => "input".into(),
-            Self::Group(_) => "group".into(),
-            Self::List(_) => "list".into(),
-            Self::Variable(var) => match var.as_str() {
-                "&" => "global variable".into(),
-                "~" => "loop variable".into(),
-                _ => format!("variable '{var}'")
-            },
-            Self::FragmentString(_) => "string".into(),
-            Self::Literal(lit) => format!("literal '{}'", lit.as_string()),
+            Self::Statements(_) => "block",
+            Self::Return(_) => "return statement",
+            Self::Break(_) => "break statement",
+            Self::Continue(_) => "continue statement",
+            Self::Exit(_) => "exit statement",
+            Self::Assign { .. } | Self::MultipleAssign { .. } => "assignment",
+            Self::If { .. } => "if expression",
+            Self::For { .. } => "for loop",
+            Self::While { .. } => "while loop",
+            Self::Loop { .. } => "loop",
+            Self::Function { .. } => "function definition",
+            Self::UnaryOp { .. } | Self::BinOp { .. } => "expression",
+            Self::Increment { .. } => "incrementation",
+            Self::Compare { .. } => "comparison",
+            Self::FnCall { .. } => "function call",
+            Self::Index { .. } => "index",
+            Self::BracketIndex { .. } => "bracket indexing thing",
+            Self::BracketIter { .. } => "bracket iterating thing",
+            Self::Slice { .. } => "slice",
+            Self::BraceIter { .. } => "brace iterating thing",
+            Self::Replace { .. } | Self::CharReplace { .. } => "replace expression",
+            Self::Print { .. } => "print",
+            Self::Input { .. } => "input",
+            Self::Group(_) => "group",
+            Self::List(_) => "list",
+            Self::Variable(_) => "variable",
+            Self::FragmentString(_) => "string",
+            Self::Literal(_) => "literal",
         })
     }
 }

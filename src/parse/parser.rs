@@ -351,7 +351,8 @@ impl Parser {
 
                 "&" | "~" => NodeType::Variable(sym.into()),
 
-                op if operators::is_op(Before, op) => NodeType::BeforeOp {
+                op if operators::is_op(Before, op) => NodeType::UnaryOp {
+                    op_type: Before,
                     op: op.into(),
                     target: Box::new(self.parse_operation(operators::op_prec(Before, op), false)?.unwrap()),
                 },
@@ -961,7 +962,8 @@ impl Parser {
                         }
                     },
 
-                    op if operators::is_op(After, op) => NodeType::AfterOp {
+                    op if operators::is_op(After, op) => NodeType::UnaryOp {
+                        op_type: After,
                         op: op.into(),
                         target: Box::new(parsed_value),
                     },

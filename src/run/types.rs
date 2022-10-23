@@ -1,6 +1,15 @@
+use std::collections::HashMap;
+
 use itertools::Itertools;
 
 use crate::util::Pos;
+
+#[derive(Debug)]
+pub struct Scope {
+    pub vars: HashMap<String, usize>,
+    pub parent: Option<usize>,
+    pub children: Vec<usize>,
+}
 
 pub trait RemoveElement<T: PartialEq> {
     fn remove_element(&mut self, element: &T);
@@ -120,7 +129,10 @@ impl ValueType {
             },
             Self::Boolean(b) => b.to_string(),
             Self::String(s) => s.clone(),
-            Self::Number(num) => num.to_string(),
+            Self::Number(num) => {
+                let s = num.to_string();
+                if s == "-0" { "0".into() } else { s }
+            }
             Self::Null() => "".into(),
         }
     }

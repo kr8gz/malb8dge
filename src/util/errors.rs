@@ -51,8 +51,7 @@ impl ColorGenerator {
 }
 
 fn replace_color(text: String, color: Color) -> String {
-    let re = Regex::new("#(?P<inner>[^#]*)#").unwrap();
-    re.replace_all(&text, "$inner".fg(color).to_string()).to_string()
+    Regex::new("#(?P<inner>[^#]*)#").unwrap().replace_all(&text, "$inner".fg(color).to_string()).to_string()
 }
 
 pub struct Error {

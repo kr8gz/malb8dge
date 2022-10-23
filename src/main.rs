@@ -13,7 +13,6 @@ mod util;
 
 mod lex;
 mod parse;
-mod compile;
 mod run;
 
 fn main() {
