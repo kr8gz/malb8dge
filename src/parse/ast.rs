@@ -19,7 +19,8 @@ pub enum NodeType {
     Break(ONode),
     Continue(ONode),
     Exit(ONode),
-    Assign { target: BNode, op: String, value: BNode }, // non-empty op = augmented assignment
+    Assign { target: BNode, value: BNode },
+    AugmentedAssign { target: BNode, op: String, value: BNode },
     MultipleAssign { targets: VNode, value: BNode },
     If { cond: BNode, on_true: ONode, on_false: ONode },
     For { iter: BNode, vars: VNode, mode: IterMode, block: BNode }, // x ~ [vars]  mode    ... // x ~ [vars]   [mode] { ... } //
@@ -55,7 +56,7 @@ impl Display for NodeType {
             Self::Break(_) => "break statement",
             Self::Continue(_) => "continue statement",
             Self::Exit(_) => "exit statement",
-            Self::Assign { .. } | Self::MultipleAssign { .. } => "assignment",
+            Self::Assign { .. } | Self::AugmentedAssign { .. } | Self::MultipleAssign { .. } => "assignment",
             Self::If { .. } => "if expression",
             Self::For { .. } => "for loop",
             Self::While { .. } => "while loop",

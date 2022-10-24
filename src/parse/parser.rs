@@ -63,14 +63,11 @@ impl Parser {
         Ok(())
     }
 
-    fn statement_sep(&mut self) -> Result<()> {
+    fn statement_sep(&mut self) {
         let next = self.next();
         if !next.value.is("\n") && !next.value.is(";") && !next.value.eof() {
-            return Err(
-                self.expected(next.pos, "statement terminator".fg(Green), next.value.fg(Red))
-            )
+            self.prev();
         }
-        Ok(())
     }
 
     fn check_vars(&self, mut node: Node, allow_list: bool, allow_index: bool, found: &str, expected: &str) -> Result<Node> {
@@ -195,7 +192,7 @@ impl Parser {
     pub fn parse(&mut self) -> Result<()> {
         while self.token_index < self.tokens.len() {
             if let Some(statement) = self.parse_statement(true)? {
-                self.statement_sep()?;
+                self.statement_sep();
                 self.statements.push(statement);
             }
         }
@@ -398,13 +395,12 @@ impl Parser {
                     } else {
                         NodeType::Assign {
                             target: Box::new(target),
-                            op: String::new(),
                             value: Box::new(self.parse_expression(false)?.unwrap()),
                         }
                     }
                 },
 
-                op if operators::is_op(Binary, &op[..op.len() - 1]) && op.ends_with('=') => NodeType::Assign {
+                op if operators::is_op(Binary, &op[..op.len() - 1]) && op.ends_with('=') => NodeType::AugmentedAssign {
                     target: Box::new(self.check_vars(expr, false, true, "augmented assignment", "target variable")?),
                     op: op[..op.len() - 1].into(),
                     value: Box::new(self.parse_expression(false)?.unwrap()),
@@ -743,7 +739,7 @@ impl Parser {
             if let Some(statement) = self.parse_statement(true)? {
                 statements.push(statement);
                 check_end!();
-                self.statement_sep()?;
+                self.statement_sep();
             }
         }
     }

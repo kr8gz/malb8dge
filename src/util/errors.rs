@@ -1,7 +1,7 @@
 use ariadne::*;
 use regex::Regex;
 
-use std::{env, fs, process};
+use std::process;
 
 use super::Pos;
 
@@ -99,8 +99,7 @@ impl Error {
         self
     }
 
-    pub fn print(self) {
-        let file = &env::args().nth(1).unwrap(); // if file arg is missing it will fail in main.rs
+    pub fn eprint(self, file: &str, code: &str) {
         let mut colgen = ColorGenerator::new(self.labels.len());
 
         let mut report = Report::build(
@@ -142,14 +141,7 @@ impl Error {
 
         report
             .finish()
-            .eprint((file, Source::from(
-                fs::read_to_string(file).unwrap().replace("\r\n", "\n")
-            )))
+            .eprint((file, Source::from(code)))
             .unwrap();
-    }
-
-    pub fn eprint(self) -> ! {
-        self.print();
-        process::exit(1);
     }
 }

@@ -1,5 +1,3 @@
-use std::fs;
-
 use crate::fmt_plural;
 use crate::util::{*, errors::Error, operators::{self, OpType::*}};
 
@@ -26,11 +24,7 @@ pub struct Lexer {
 }
 
 impl Lexer {
-    pub fn from_file(file: &str) -> Self {
-        Self::from_str(fs::read_to_string(file).unwrap_or_else(|err| Error::simple(err)), 0)
-    }
-
-    pub fn from_str(code: String, offset: usize) -> Self {
+    pub fn new(code: &str, offset: usize) -> Self {
         Self {
             chars: code.replace("\r\n", "\n").chars().collect(),
 
@@ -442,7 +436,7 @@ impl Lexer {
     }
 
     fn lex_expr_frag(&self, expr: String, offset: usize) -> Result<LexedFragment> {
-        let mut lexer = Lexer::from_str(expr, offset);
+        let mut lexer = Lexer::new(&expr, offset);
         lexer.lex()?;
         Ok(LexedFragment::Expr(lexer))
     }

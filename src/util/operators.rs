@@ -112,18 +112,11 @@ operators! {
 pub fn run_unary_op(mut target: Value, op_type: OpType, op: &str, pos: &Pos) -> Result<ValueType> {
     use ValueType::*;
             
-    let repr = match op_type {
-        OpType::Before => format!("{}x", op),
-        OpType::After => format!("x{}", op),
+    let (repr, op_pos) = match op_type {
+        OpType::Before => (format!("{}x", op), pos.start..target.pos.start),
+        OpType::After => (format!("x{}", op), target.pos.end..pos.end),
         _ => panic!("specified type isn't a unary operator")
     };
-
-    let err = Error::err("Type error")
-        .label(target.pos.clone(), format!("This has type #{}#", target.type_name()))
-        .label(
-            pos.clone(),
-            format!("#{repr}# is not implemented for type #{}#", target.type_name())
-        );
 
     macro_rules! unary_ops {
         (
@@ -150,7 +143,11 @@ pub fn run_unary_op(mut target: Value, op_type: OpType, op: &str, pos: &Pos) -> 
                         match target.data {
                             $( $a => $ret, )*
                             #[allow(unreachable_patterns)] // not every operator matches all types
-                            _ => return Err(err)
+                            _ => return Err(
+                                Error::err("Type error")
+                                    .label(target.pos.clone(), format!("This has type #{}#", target.type_name()))
+                                    .label(op_pos, format!("#{repr}# is not implemented for type #{}#", target.type_name()))
+                            )
                         }
                     }
                 )*
@@ -342,14 +339,12 @@ pub fn run_bin_op(mut lhs: Value, mut rhs: Value, op: &str, pos: &Pos) -> Result
                             _ => {
                                 let l_type = lhs.type_name();
                                 let r_type = rhs.type_name();
+                                let op_pos = lhs.pos.end..rhs.pos.start;
                                 return Err(
                                     Error::err("Type error")
                                         .label(lhs.pos, format!("This has type #{l_type}#"))
                                         .label(rhs.pos, format!("This has type #{r_type}#"))
-                                        .label(
-                                            pos.clone(),
-                                            format!("Binary #{op}# is not implemented for types #{l_type}# and #{r_type}#")
-                                        )
+                                        .label(op_pos, format!("Binary #{op}# is not implemented for types #{l_type}# and #{r_type}#"))
                                 )
                             }
                         }

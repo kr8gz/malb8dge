@@ -25,7 +25,7 @@ pub enum TokenType {
 
 impl TokenType {
     pub fn is(&self, sym: &str) -> bool {
-        matches!(self, TokenType::Symbol(ref s) if s == sym)
+        matches!(self, TokenType::Symbol(s) if s == sym)
     }
 
     pub fn eof(&self) -> bool {

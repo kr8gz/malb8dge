@@ -28,8 +28,8 @@ macro_rules! token_test {
 macro_rules! lex {
     ( $code:expr, $offset:expr ) => {
         {
-            let mut lexer = Lexer::from_str($code.into(), $offset);
-            lexer.lex().unwrap_or_else(|e| e.eprint());
+            let mut lexer = Lexer::new($code.into(), $offset);
+            lexer.lex().unwrap_or_else(|e| e.eprint("<test>.mlb8", $code));
             lexer
         }
     }

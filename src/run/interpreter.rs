@@ -1,6 +1,6 @@
 use std::{io::{self, Write}, process, collections::HashMap};
 
-use crate::{util::{*, errors::Error, operators::OpType}, parse::{parser::Parser, ast::*}};
+use crate::{util::{*, errors::Error, operators::OpType, self}, parse::{parser::Parser, ast::*}};
 
 use super::types::*;
 
@@ -72,7 +72,10 @@ impl Interpreter {
             for stmt in rest {
                 self.run_node(stmt, 0)?;
             }
-            println!("{}", self.run_node(last, 0)?.as_string());
+            let value = self.run_node(last, 0)?;
+            if !matches!(last.data, NodeType::Print { .. }) {
+                println!("{}", value.as_string());
+            }
         }
 
         Ok(())
@@ -169,7 +172,7 @@ impl Interpreter {
                     if !res { return Ok(false) }
                     first = second;
                 }
-                
+
                 Ok(true)
             })()?)),
 
@@ -241,7 +244,7 @@ impl Interpreter {
                 let mut input = String::new();
                 io::stdin().read_line(&mut input).expect("hgow did not can read line :>(");
 
-                while input.ends_with(['\n', '\r']) { input.pop(); }
+                util::trim_nl(&mut input);
                 let value = value!(String(input));
 
                 match mode {
