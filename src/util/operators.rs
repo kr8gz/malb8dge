@@ -56,14 +56,6 @@ pub fn is_op(op_type: OpType, op: &str) -> bool {
     OP_TABLE.contains(&(op_type, op))
 }
 
-pub fn op_id(op_type: OpType, op: &str) -> usize {
-    OP_TABLE.iter().position(|o| o == &(op_type, op)).unwrap()
-}
-
-pub fn id_sym(id: usize) -> &'static str {
-    OP_TABLE[id].1
-}
-
 pub fn prec_type(prec: usize) -> PrecType {
     PREC_LIST[prec - 1]
 }
@@ -277,11 +269,13 @@ pub fn run_unary_op(mut target: Value, op_type: OpType, op: &str, pos: &Pos) -> 
             }
 
             "'" {
-                
+                % convert a @ (Boolean(_) | Null()) => Number(a.as_int().unwrap());
+                Number(a) => Number(a.round());
             }
 
             "`" {
-                a => String(a.as_string());
+                % convert a @ (Boolean(_) | Null()) => Number(a.as_int().unwrap());
+                Number(a) => Number(a.floor());
             }
         },
 
@@ -401,8 +395,6 @@ pub fn run_bin_op(mut lhs: Value, mut rhs: Value, op: &str, pos: &Pos) -> Result
             a, b => if a.as_bool() { b } else { a };
         }
     
-        // compare operators (would probably be a lot of copy paste so maybe theres a better solution like with PartialOrd or something)
-    
         "-?" {
             // something with 1 and -1 lol
         }
@@ -410,8 +402,6 @@ pub fn run_bin_op(mut lhs: Value, mut rhs: Value, op: &str, pos: &Pos) -> Result
         ".." {
     
         }
-        
-        // might need a Range value type
     
         "#" {
     

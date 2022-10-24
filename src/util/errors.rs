@@ -64,8 +64,8 @@ pub struct Error {
 }
 
 impl Error {
-    pub fn simple(msg: String) -> ! {
-        eprintln!("{} {msg}", "Error:".fg(Color::Red));
+    pub fn simple(msg: impl ToString) -> ! {
+        eprintln!("{} {}", "Error:".fg(Color::Red), msg.to_string());
         process::exit(1)
     }
 
@@ -113,10 +113,7 @@ impl Error {
 
         if self.labels.len() == 1 {
             for (pos, msg) in self.labels {
-                let color = match self.kind {
-                    ReportKind::Warning => Color::Yellow,
-                    _ => Color::RGB(255, 127, 127)
-                };
+                let color = colgen.next();
                 report = report.with_label(
                     Label::new((file, pos))
                         .with_message(replace_color(msg, color))

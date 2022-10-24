@@ -73,17 +73,18 @@ impl Parser {
         Ok(())
     }
 
-    fn check_vars(&self, mut node: Node, allow_list: bool, found: &str, expected: &str) -> Result<Node> {
+    fn check_vars(&self, mut node: Node, allow_list: bool, allow_index: bool, found: &str, expected: &str) -> Result<Node> {
         node.data = match node.data {
-            NodeType::Group(group) => self.check_vars(*group, allow_list, found, expected)?.data,
+            NodeType::Group(group) => self.check_vars(*group, allow_list, allow_index, found, expected)?.data,
 
             NodeType::List(list) if allow_list => NodeType::List(
                 list.into_iter()
-                    .map(|el| self.check_vars(el, false, found, expected))
+                    .map(|el| self.check_vars(el, false, allow_index, found, expected))
                     .collect::<Result<_>>()?
             ),
 
-            ok @ (NodeType::Variable(_) | NodeType::Index { .. }) => ok,
+            var @ NodeType::Variable(_) => var,
+            idx @ NodeType::Index { .. } if allow_index => idx,
             
             _ => return Err(
                 Error::err("Syntax error")
@@ -94,10 +95,10 @@ impl Parser {
         Ok(node)
     }
 
-    fn check_var_list(&self, nodes: Vec<Node>, found: &str, expected: &str) -> Result<Vec<Node>> {
+    fn check_var_list(&self, nodes: Vec<Node>, allow_index: bool, found: &str, expected: &str) -> Result<Vec<Node>> {
         let mut vars = Vec::new();
         for node in nodes {
-            let node = self.check_vars(node, true, found, expected)?;
+            let node = self.check_vars(node, true, allow_index, found, expected)?;
             match node.data {
                 NodeType::List(mut list) => vars.append(&mut list),
                 NodeType::Variable(_) | NodeType::Index { .. } => vars.push(node),
@@ -387,7 +388,7 @@ impl Parser {
                 "!" if !self.stop.contains(&"!") => self.parse_if(expr, true)?,
 
                 "=" if !self.stop.contains(&"=") => {
-                    let target = self.check_vars(expr, true, "assignment", "target variable(s)")?;
+                    let target = self.check_vars(expr, true, true, "assignment", "target variable(s)")?;
 
                     if let NodeType::List(targets) = target.data {
                         NodeType::MultipleAssign {
@@ -404,7 +405,7 @@ impl Parser {
                 },
 
                 op if operators::is_op(Binary, &op[..op.len() - 1]) && op.ends_with('=') => NodeType::Assign {
-                    target: Box::new(self.check_vars(expr, false, "augmented assignment", "target variable")?),
+                    target: Box::new(self.check_vars(expr, false, true, "augmented assignment", "target variable")?),
                     op: op[..op.len() - 1].into(),
                     value: Box::new(self.parse_expression(false)?.unwrap()),
                 },
@@ -424,12 +425,9 @@ impl Parser {
     }
 
     fn parse_fn_def(&mut self, args: Vec<Node>) -> Result<NodeType> {
+        let args = self.check_var_list(args, false, "function definition", "argument name")?;
         let block = self.with_func(|s| s.parse_statement(false))?.unwrap();
-        self.functions.push(Function {
-            args: self.check_var_list(args, "function definition", "argument name")?,
-            block,
-        });
-        
+        self.functions.push(Function { args, block });
         Ok(NodeType::Function {
             index: self.functions.len() - 1,
         })
@@ -579,7 +577,7 @@ impl Parser {
             
             else if next.is("=") {
                 return Ok(NodeType::MultipleAssign {
-                    targets: self.check_var_list(list, "assignment", "target variable")?,
+                    targets: self.check_var_list(list, true, "assignment", "target variable")?,
                     value: Box::new(self.parse_expression(false)?.unwrap()),
                 })
             }

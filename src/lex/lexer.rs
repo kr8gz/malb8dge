@@ -27,11 +27,7 @@ pub struct Lexer {
 
 impl Lexer {
     pub fn from_file(file: &str) -> Self {
-        let code = fs::read_to_string(file).unwrap_or_else(|err| {
-            Error::simple(err.to_string())
-        });
-
-        Self::from_str(code, 0)
+        Self::from_str(fs::read_to_string(file).unwrap_or_else(|err| Error::simple(err)), 0)
     }
 
     pub fn from_str(code: String, offset: usize) -> Self {
@@ -213,6 +209,10 @@ impl Lexer {
             }
         }
 
+        if is_escape {
+            push_target.push('`');
+        }
+
         if step == ReplaceLexStep::LeftPattern {
             self.prev();
 
@@ -353,6 +353,10 @@ impl Lexer {
             else {
                 frag.push(next);
             }
+        }
+
+        if is_escape {
+            frag.push('\\');
         }
 
         if fragments.is_empty() {

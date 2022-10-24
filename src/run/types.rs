@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{cmp::Ordering, collections::HashMap};
 
 use itertools::Itertools;
 
@@ -28,7 +28,42 @@ pub struct Value {
     pub data: ValueType,
     pub pos: Pos,
 }
-        
+
+impl PartialOrd for Value {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        use ValueType::*;
+
+        match (&self.data, &other.data) {
+            (List(a), List(b)) => a.partial_cmp(b),
+            (String(a), String(b)) => a.partial_cmp(b),
+
+            (String(a), n @ Number(b)) => match a.parse::<f64>() {
+                Ok(a) => a.partial_cmp(b),
+                _ => a.partial_cmp(&n.as_string())
+            }
+
+            (n @ Number(a), String(b)) => match b.parse::<f64>() {
+                Ok(b) => a.partial_cmp(&b),
+                _ => n.as_string().partial_cmp(b)
+            }
+
+            (String(a), Boolean(b)) => match a.parse::<bool>() {
+                Ok(a) => a.partial_cmp(b),
+                _ => a.partial_cmp(&b.to_string())
+            }
+
+            (Boolean(a), String(b)) => match b.parse::<bool>() {
+                Ok(b) => a.partial_cmp(&b),
+                _ => a.to_string().partial_cmp(b)
+            }
+
+            (String(a), Null()) => a.as_str().partial_cmp(""),
+            (Null(), String(b)) => "".partial_cmp(b),
+            (a, b) => a.as_num()?.partial_cmp(&b.as_num()?)
+        }
+    }
+}
+
 impl Value {
     pub fn type_name(&self) -> String {
         self.data.type_name()
@@ -123,10 +158,8 @@ impl ValueType {
 
     pub fn as_string(&self) -> String {
         match self {
-            Self::Function(_) => "<function>".into(),
-            Self::List(list) => {
-                format!("[{}]", list.iter().map(|v| v.data.as_repr_string()).collect::<Vec<_>>().join(", "))
-            },
+            Self::Function(index) => format!("<function@{index}>"),
+            Self::List(list) => format!("[{}]", list.iter().map(|v| v.data.as_repr_string()).collect::<Vec<_>>().join(", ")),
             Self::Boolean(b) => b.to_string(),
             Self::String(s) => s.clone(),
             Self::Number(num) => {
@@ -139,7 +172,13 @@ impl ValueType {
 
     pub fn as_repr_string(&self) -> String {
         match self {
-            Self::String(s) => format!("\"{s}\""),
+            Self::String(s) => {
+                let mut s = s.clone();
+                for ch in ['"', '\\', '{', '}'] {
+                    s = s.replace(ch, &format!("\\{ch}"));
+                }
+                format!("\"{}\"", s.replace('\n', "\\n").replace('\t', "\\t"))
+            }
             Self::Null() => "null".into(),
             _ => self.as_string(),
         }

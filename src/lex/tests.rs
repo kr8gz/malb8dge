@@ -80,11 +80,11 @@ token_test! {
 token_test! {
     operators
 
-    "+ * /."
+    "+ * //"
 
     TokenType::Symbol("+".into()),  0..1
     TokenType::Symbol("*".into()),  2..3
-    TokenType::Symbol("/.".into()), 4..6
+    TokenType::Symbol("//".into()), 4..6
 }
 
 token_test! {
@@ -127,7 +127,7 @@ token_test! {
 
     TokenType::Symbol("+".into()),          9..10
 
-    TokenType::Number(0.0),                  11..14
+    TokenType::Number(0.0),                 11..14
 }
 
 token_test! {
@@ -135,9 +135,7 @@ token_test! {
     
     "\"Hello World!\""
 
-    TokenType::FragmentString(vec![
-        LexedFragment::Literal("Hello World!".into())
-    ]), 0..14
+    TokenType::String("Hello World!".into()), 0..14
 }
 
 token_test! {
@@ -169,9 +167,7 @@ token_test! {
 
     "\"[\\n, \\t, \\\", \\\\, \\{, \\}, \\invalid]\""
 
-    TokenType::FragmentString(vec![
-        LexedFragment::Literal("[\n, \t, \", \\, {, }, \\invalid]".into())
-    ]), 0..36
+    TokenType::String("[\n, \t, \", \\, {, }, \\invalid]".into()), 0..36
 }
 
 token_test! {

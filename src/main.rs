@@ -19,7 +19,7 @@ fn main() {
     let mut args = env::args();
     args.next(); // first arg is the location of the .exe
 
-    let file = args.next().unwrap_or_else(|| Error::simple("Missing required argument: filename".into()));
+    let file = args.next().unwrap_or_else(|| Error::simple("Missing required argument: filename"));
 
     macro_rules! parse_args {
         ( $( $var:ident: $arg:literal, )* ) => {
@@ -44,7 +44,6 @@ fn main() {
         debug_lexer: "-dl",
         debug_parser: "-dp",
         debug_interpreter: "-di",
-        warnings: "-w",
     };
 
     macro_rules! handle {
