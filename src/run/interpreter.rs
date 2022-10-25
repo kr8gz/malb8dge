@@ -126,7 +126,7 @@ impl Interpreter {
 
                     let mut i = index.data.as_int().ok_or_else(|| {
                         Error::err("Type error")
-                            .label(pos.clone(), "Expected an integer for list index")
+                            .label(pos.start..index.pos.start, "Expected an integer for list index")
                             .label(index.pos.clone(), format!("Cannot convert #{}# to an integer", index.as_repr_string(&self.memory)))
                     })?;
 
@@ -135,7 +135,7 @@ impl Interpreter {
                         ValueType::String(s) => s.len() as f64,
                         _ => return Err(
                             Error::err("Type error")
-                                .label(pos.clone(), "Expected a list to index")
+                                .label(target.pos.end..pos.end, "Expected a list to index")
                                 .label(target.pos.clone(), format!("Cannot convert #{}# to a list", target.as_repr_string(&self.memory)))
                         )
                     };
