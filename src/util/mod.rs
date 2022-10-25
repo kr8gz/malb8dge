@@ -24,7 +24,3 @@ impl Reverse for String {
         self.chars().rev().collect()
     }
 }
-
-pub fn trim_nl(s: &mut String) {
-    while s.ends_with(['\n', '\r']) { s.pop(); }
-}

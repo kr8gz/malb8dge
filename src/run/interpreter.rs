@@ -1,11 +1,17 @@
 use std::{io::{self, Write}, process, collections::HashMap};
 
-use crate::{util::{*, errors::Error, operators::OpType, self}, parse::{parser::Parser, ast::*}};
+use ariadne::{Fmt, Color};
+
+use crate::{util::{*, errors::Error, operators::OpType}, parse::{parser::Parser, ast::*}};
 
 use super::types::*;
 
+const GREEN: Color = Color::Fixed(2);
+
 #[derive(Debug)]
 pub struct Interpreter {
+    is_shell: bool,
+
     scopes: Vec<Scope>,
     variables: Vec<Value>,
     var_count: usize,
@@ -13,8 +19,10 @@ pub struct Interpreter {
 }
 
 impl Interpreter {
-    pub fn new() -> Self {
+    pub fn new(is_shell: bool) -> Self {
         Self {
+            is_shell,
+
             scopes: Vec::new(),
             variables: Vec::new(),
             var_count: 0,
@@ -72,9 +80,13 @@ impl Interpreter {
             for stmt in rest {
                 self.run_node(stmt, 0)?;
             }
-            let value = self.run_node(last, 0)?;
+
+            let mut value = self.run_node(last, 0)?.as_string();
             if !matches!(last.data, NodeType::Print { .. }) {
-                println!("{}", value.as_string());
+                if self.is_shell {
+                    value = value.fg(GREEN).to_string()
+                };
+                println!("{value}");
             }
         }
 
@@ -224,12 +236,22 @@ impl Interpreter {
             Print { value, mode } => {
                 use PrintMode::*;
                 let value = self.run_node(value, scope)?;
-                match mode {
-                    Default      => println!("{}", value.as_joined_list_string("")),
-                    NoNewline    => print!  ("{}", value.as_joined_list_string("")),
-                    Spaces       => println!("{}", value.as_joined_list_string(" ")),
-                    SplitNewline => println!("{}", value.as_joined_list_string("\n")),
+                let mut formatted_value = match mode {
+                    Default      => value.as_joined_list_string(""),
+                    NoNewline    => value.as_joined_list_string(""),
+                    Spaces       => value.as_joined_list_string(" "),
+                    SplitNewline => value.as_joined_list_string("\n"),
+                };
+
+                if self.is_shell {
+                    formatted_value = formatted_value.fg(GREEN).to_string();
                 }
+                
+                match mode {
+                    NoNewline => print!("{formatted_value}"),
+                    _ => println!("{formatted_value}")
+                }
+
                 value
             }
             
@@ -243,9 +265,7 @@ impl Interpreter {
 
                 let mut input = String::new();
                 io::stdin().read_line(&mut input).expect("hgow did not can read line :>(");
-
-                util::trim_nl(&mut input);
-                let value = value!(String(input));
+                let value = value!(String(input.lines().next().unwrap().into()));
 
                 match mode {
                     Default => value,

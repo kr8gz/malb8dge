@@ -72,7 +72,7 @@ fn main() {
             handle!(parser.parse());
             if debug || debug_parser { println!("{:#?}", &parser); }
             
-            let mut interpreter = Interpreter::new();
+            let mut interpreter = Interpreter::new(is_shell);
             handle!(interpreter.run(parser));
             if debug || debug_interpreter { println!("{:#?}", &interpreter); }
         }
@@ -92,10 +92,8 @@ fn main() {
                 let mut line = String::new();
                 io::stdin().read_line(&mut line).expect("can you stop inputting invalid utf8");
     
-                let mut nl_check = line.clone();
-                util::trim_nl(&mut nl_check);
-    
-                if nl_check.is_empty() {
+                if line.trim().is_empty() {
+                    print!("\x1b[A   \r"); // delete the ... prompt above
                     break
                 } else {
                     eval.push_str(&line.replace("\r\n", "\n"));
