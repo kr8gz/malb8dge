@@ -7,7 +7,7 @@ use ariadne::{Fmt, Color};
 use crate::{
     lex::lexer::Lexer,
     parse::parser::Parser,
-    run::interpreter::Interpreter,
+    run::{interpreter::Interpreter},
     util::errors::Error,
 };
 
@@ -38,7 +38,7 @@ fn main() {
                             $var = true;
                         }
                     )*
-                    _ => Error::simple(format!("Invalid argument '{arg}'"))
+                    _ => Error::simple(format!("Unknown argument '{arg}'"))
                 }
             }
         }
@@ -46,35 +46,39 @@ fn main() {
 
     parse_args! {
         debug: "-d",
-        debug_lexer: "-dl",
-        debug_parser: "-dp",
-        debug_interpreter: "-di",
+        debug_lexer: "-l",
+        debug_parser: "-p",
+        debug_interpreter: "-i",
     };
     
     let mut code = String::new();
+    let mut interpreter = Interpreter::new(is_shell);
 
     macro_rules! handle {
-        ( $expr:expr ) => {
-            $expr.unwrap_or_else(|e| {
-                e.eprint(&file, &code);
-                if !is_shell { process::exit(1) }
-            })
+        ( $expr:expr => $next:expr ) => {
+            match $expr {
+                Ok(_) => $next,
+                Err(e) => {
+                    e.eprint(&file, &code);
+                    if !is_shell { process::exit(1) }
+                }
+            }
         }
     }
 
     macro_rules! run {
         ( $eval:expr, $offset:expr ) => {
             let mut lexer = Lexer::new(&$eval, $offset);
-            handle!(lexer.lex());
-            if debug || debug_lexer { println!("{:#?}", &lexer); }
-            
-            let mut parser = Parser::new(lexer);
-            handle!(parser.parse());
-            if debug || debug_parser { println!("{:#?}", &parser); }
-            
-            let mut interpreter = Interpreter::new(is_shell);
-            handle!(interpreter.run(parser));
-            if debug || debug_interpreter { println!("{:#?}", &interpreter); }
+            handle!(lexer.lex() => {
+                if debug || debug_lexer { println!("{:#?}", &lexer); }
+                let mut parser = Parser::new(lexer);
+                handle!(parser.parse() => {
+                    if debug || debug_parser { println!("{:#?}", &parser); }
+                    handle!(interpreter.run(parser) => {
+                        if debug || debug_interpreter { println!("{:#?}", &interpreter); }
+                    })
+                })
+            })
         }
     }
 
@@ -93,7 +97,8 @@ fn main() {
                 io::stdin().read_line(&mut line).expect("can you stop inputting invalid utf8");
     
                 if line.trim().is_empty() {
-                    print!("\x1b[A   \r"); // delete the ... prompt above
+                    print!("\x1b[A   \r"); // overwrite the ... prompt above
+                    io::stdout().flush().expect("noo omy hack didnt work :(:sob::");
                     break
                 } else {
                     eval.push_str(&line.replace("\r\n", "\n"));
@@ -103,6 +108,7 @@ fn main() {
             }
 
             code.push_str(&eval);
+            eval.pop(); // remove last newline
             run!(eval, offset);
         }
     }

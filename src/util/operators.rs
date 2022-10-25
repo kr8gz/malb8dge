@@ -109,8 +109,10 @@ operators! {
     Other:      "%%", "++", "--",
 }
 
-pub fn run_unary_op(mut target: Value, op_type: OpType, op: &str, pos: &Pos) -> Result<ValueType> {
+pub fn run_unary_op(memory: &mut Stack, target_id: usize, op_type: OpType, op: &str, pos: &Pos) -> Result<ValueType> {
     use ValueType::*;
+
+    let mut target = memory[target_id].clone();
             
     let (repr, op_pos) = match op_type {
         OpType::Before => (format!("{}x", op), pos.start..target.pos.start),
@@ -167,9 +169,9 @@ pub fn run_unary_op(mut target: Value, op_type: OpType, op: &str, pos: &Pos) -> 
                             let i = a.as_int().ok_or_else(|| {
                                 Error::err("Type error")
                                     .label(pos.clone(), format!("Expected an integer for {op}x"))
-                                    .label(target.pos.clone(), format!("Cannot convert #{}# to an integer", a.as_repr_string()))
+                                    .label(target.pos.clone(), format!("Cannot convert #{}# to an integer", a.as_repr_string(memory)))
                             })? as i64;
-                            if i < 0 { i..0 } else { 0..i }.map(|i| ValueType::Number(i as f64).into_value(pos)).collect()
+                            if i < 0 { i..0 } else { 0..i }.map(|i| memory.push(ValueType::Number(i as f64).into_value(pos))).collect()
                         });
             }
 
@@ -181,7 +183,7 @@ pub fn run_unary_op(mut target: Value, op_type: OpType, op: &str, pos: &Pos) -> 
                 a   =>  Number(-a.as_num().ok_or_else(|| {
                             Error::err("Type error")
                                 .label(pos.clone(), format!("Expected a number for {op}x"))
-                                .label(target.pos.clone(), format!("Cannot convert #{}# to a number", a.as_repr_string()))
+                                .label(target.pos.clone(), format!("Cannot convert #{}# to a number", a.as_repr_string(memory)))
                         })?);
             }
 
@@ -202,7 +204,7 @@ pub fn run_unary_op(mut target: Value, op_type: OpType, op: &str, pos: &Pos) -> 
             }
 
             "@" {
-                % convert Boolean(_) | Null() => String(target.as_repr_string());
+                % convert Boolean(_) | Null() => String(target.as_repr_string(memory));
 
                 String(a)   => String(a.reverse());
                 List(mut a) => List({ a.reverse(); a });
@@ -240,7 +242,7 @@ pub fn run_unary_op(mut target: Value, op_type: OpType, op: &str, pos: &Pos) -> 
             }
 
             "_" {
-                % convert Boolean(_) | Null() => String(target.as_string());
+                % convert Boolean(_) | Null() => String(target.as_string(memory));
 
                 String(a)   =>  Number(a.len() as f64);
                 List(a)     =>  Number(a.len() as f64);
@@ -282,8 +284,15 @@ pub fn run_unary_op(mut target: Value, op_type: OpType, op: &str, pos: &Pos) -> 
     Ok(ret)
 }
 
-pub fn run_bin_op(mut lhs: Value, mut rhs: Value, op: &str, pos: &Pos) -> Result<ValueType> {
+pub fn run_bin_op(memory: &mut Stack, lhs_id: usize, rhs_id: usize, op: &str, pos: &Pos) -> Result<ValueType> {
     use ValueType::*;
+
+    let mut lhs = memory[lhs_id].clone();
+    let mut rhs = memory[rhs_id].clone();
+
+    macro_rules! push {
+        ( $value:expr ) => { memory.push($value.into_value(pos)) }
+    }
 
     macro_rules! bin_ops {
         (
@@ -426,11 +435,11 @@ pub fn run_bin_op(mut lhs: Value, mut rhs: Value, op: &str, pos: &Pos) -> Result
             Number(a),  Number(b)   =>  Number(a + b);
             List(a),    List(b)     =>  List(a.into_iter().chain(b.into_iter()).collect());
             String(a),  String(b)   =>  String(a + &b);
-            String(a),  b @ List(_) =>  String(a + &b.as_joined_list_string(""));
+            String(a),  b @ List(_) =>  String(a + &b.as_joined_list_string(memory, ""));
     
             % both ways
-            List(a),    _           =>  List(a.into_iter().chain([rhs]).collect());
-            String(a),  _           =>  String(a + &rhs.as_string());
+            List(a),    _           =>  List(a.into_iter().chain([rhs_id]).collect());
+            String(a),  _           =>  String(a + &rhs.as_string(memory));
         }
     
         "-" {
@@ -439,7 +448,7 @@ pub fn run_bin_op(mut lhs: Value, mut rhs: Value, op: &str, pos: &Pos) -> Result
     
             % one way
             List(mut a), List(b)    =>  List({ for el in b { a.remove_element(&el); }; a });
-            List(mut a), _          =>  List({ a.remove_element(&rhs); a });
+            List(mut a), _          =>  List({ a.remove_element(&rhs_id); a });
     
             String(a),  String(b)   =>  String({
                                             if a.len() == 1 && b.len() == 1 {
@@ -522,7 +531,7 @@ pub fn run_bin_op(mut lhs: Value, mut rhs: Value, op: &str, pos: &Pos) -> Result
             x @ (Boolean(_) | Null()) => Number(x.as_int().unwrap());
     
             % one way
-            Number(a),  Number(b)   =>  List(vec![Number(a + b).into_value(pos), Number(a - b).into_value(pos)]);
+            Number(a),  Number(b)   =>  List(vec![push!(Number(a + b)), push!(Number(a - b))]);
         }
     
         "/%" {
@@ -530,7 +539,7 @@ pub fn run_bin_op(mut lhs: Value, mut rhs: Value, op: &str, pos: &Pos) -> Result
             x @ (Boolean(_) | Null()) => Number(x.as_int().unwrap());
     
             % one way
-            Number(a),  Number(b)   =>  List(vec![Number((a / b).trunc()).into_value(pos), Number(a % b).into_value(pos)]);
+            Number(a),  Number(b)   =>  List(vec![push!(Number((a / b).trunc())), push!(Number(a % b))]);
         }
     
         "^" {
@@ -541,7 +550,7 @@ pub fn run_bin_op(mut lhs: Value, mut rhs: Value, op: &str, pos: &Pos) -> Result
             Number(a),  Number(b)   =>  Number(a.powf(b));
             List(a),    List(b)     =>  List(unique!(a.iter().chain(b.iter()).cloned().filter(|id| a.contains(id) != b.contains(id))));
             
-            List(a),    String(b)   =>  String(a.into_iter().map(|el| el.as_string()).join(&b));
+            List(a),    String(b)   =>  String(a.into_iter().map(|el| memory[el].as_string(memory)).join(&b));
             String(a),  String(b)   =>  String(a.chars().map(|c| c.to_string()).intersperse(b).collect());
         }
     

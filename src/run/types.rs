@@ -1,8 +1,36 @@
-use std::{cmp::Ordering, collections::HashMap};
+use std::{cmp::Ordering, collections::HashMap, ops::{Index, IndexMut}};
 
 use itertools::Itertools;
 
 use crate::util::Pos;
+
+#[derive(Debug)]
+pub struct Stack(Vec<Value>);
+
+impl Stack {
+    pub fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    pub fn push(&mut self, value: Value) -> usize {
+        self.0.push(value);
+        self.0.len() - 1
+    }
+}
+
+impl Index<usize> for Stack {
+    type Output = Value;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
+    }
+}
+
+impl IndexMut<usize> for Stack {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.0[index]
+    }
+}
 
 #[derive(Debug)]
 pub struct Scope {
@@ -23,6 +51,11 @@ impl<T: PartialEq> RemoveElement<T> for Vec<T> {
     }
 }
 
+fn f64_to_str(num: f64) -> String {
+    let s = num.to_string();
+    if s == "-0" { "0".into() } else { s }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Value {
     pub data: ValueType,
@@ -37,14 +70,14 @@ impl PartialOrd for Value {
             (List(a), List(b)) => a.partial_cmp(b),
             (String(a), String(b)) => a.partial_cmp(b),
 
-            (String(a), n @ Number(b)) => match a.parse::<f64>() {
+            (String(a), Number(b)) => match a.parse::<f64>() {
                 Ok(a) => a.partial_cmp(b),
-                _ => a.partial_cmp(&n.as_string())
+                _ => a.partial_cmp(&f64_to_str(*b))
             }
 
-            (n @ Number(a), String(b)) => match b.parse::<f64>() {
+            (Number(a), String(b)) => match b.parse::<f64>() {
                 Ok(b) => a.partial_cmp(&b),
-                _ => n.as_string().partial_cmp(b)
+                _ => f64_to_str(*a).partial_cmp(b)
             }
 
             (String(a), Boolean(b)) => match a.parse::<bool>() {
@@ -81,16 +114,16 @@ impl Value {
         self.data.as_bool()
     }
 
-    pub fn as_string(&self) -> String {
-        self.data.as_string()
+    pub fn as_string(&self, memory: &Stack) -> String {
+        self.data.as_string(memory)
     }
 
-    pub fn as_repr_string(&self) -> String {
-        self.data.as_repr_string()
+    pub fn as_repr_string(&self, memory: &Stack) -> String {
+        self.data.as_repr_string(memory)
     }
 
-    pub fn as_joined_list_string(&self, sep: &str) -> String {
-        self.data.as_joined_list_string(sep)
+    pub fn as_joined_list_string(&self, memory: &Stack, sep: &str) -> String {
+        self.data.as_joined_list_string(memory, sep)
     }
 }
 
@@ -115,7 +148,7 @@ macro_rules! types {
 
 types! {
     Function(usize),
-    List(Vec<Value>),
+    List(Vec<usize>),
     String(String),
     Number(f64),
     Boolean(bool),
@@ -156,21 +189,20 @@ impl ValueType {
         }
     }
 
-    pub fn as_string(&self) -> String {
+    pub fn as_string(&self, memory: &Stack) -> String {
         match self {
             Self::Function(index) => format!("<function@{index}>"),
-            Self::List(list) => format!("[{}]", list.iter().map(|v| v.data.as_repr_string()).collect::<Vec<_>>().join(", ")),
+            Self::List(list) => format!(
+                "[{}]", list.iter().map(|&v| memory[v].data.as_repr_string(memory)).collect::<Vec<_>>().join(", ")
+            ),
             Self::Boolean(b) => b.to_string(),
             Self::String(s) => s.clone(),
-            Self::Number(num) => {
-                let s = num.to_string();
-                if s == "-0" { "0".into() } else { s }
-            }
+            Self::Number(num) => f64_to_str(*num),
             Self::Null() => "".into(),
         }
     }
 
-    pub fn as_repr_string(&self) -> String {
+    pub fn as_repr_string(&self, memory: &Stack) -> String {
         match self {
             Self::String(s) => {
                 let mut s = s.clone();
@@ -180,20 +212,20 @@ impl ValueType {
                 format!("\"{}\"", s.replace('\n', "\\n").replace('\t', "\\t"))
             }
             Self::Null() => "null".into(),
-            _ => self.as_string(),
+            _ => self.as_string(memory),
         }
     }
 
-    pub fn as_joined_list_string(&self, sep: &str) -> String {
+    pub fn as_joined_list_string(&self, memory: &Stack, sep: &str) -> String {
         match self {
             ValueType::List(list) => {
                 list.iter()
-                    .map(|v| v.as_string())
+                    .map(|&v| memory[v].as_string(memory))
                     .join(sep)
             }
 
             _ => {
-                let ret = self.as_string();
+                let ret = self.as_string(memory);
                 if sep.is_empty() {
                     return ret
                 }
