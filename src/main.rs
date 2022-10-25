@@ -3,11 +3,12 @@
 use std::{env, fs, io::{self, Write}, process};
 
 use ariadne::{Fmt, Color};
+use yansi::Paint;
 
 use crate::{
     lex::lexer::Lexer,
     parse::parser::Parser,
-    run::{interpreter::Interpreter},
+    run::interpreter::Interpreter,
     util::errors::Error,
 };
 
@@ -17,13 +18,17 @@ mod run;
 mod util;
 
 fn main() {
+    if !Paint::enable_windows_ascii() {
+        Paint::disable();
+    }
+
     let mut args = env::args();
     args.next(); // first arg is the location of the .exe
 
     let mut is_shell = false;
     let file = args.next().unwrap_or_else(|| {
         is_shell = true;
-        "shell".into()
+        "<shell>".into()
     });
 
     macro_rules! parse_args {
@@ -95,8 +100,10 @@ fn main() {
             loop {
                 let mut line = String::new();
                 io::stdin().read_line(&mut line).expect("can you stop inputting invalid utf8");
-    
-                if line.trim().is_empty() {
+
+                if line.is_empty() {
+                    continue
+                } else if line.trim().is_empty() {
                     print!("\x1b[A   \r"); // overwrite the ... prompt above
                     io::stdout().flush().expect("noo omy hack didnt work :(:sob::");
                     break

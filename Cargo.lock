@@ -42,6 +42,7 @@ dependencies = [
  "ariadne",
  "itertools",
  "regex",
+ "yansi",
 ]
 
 [[package]]

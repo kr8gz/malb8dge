@@ -55,7 +55,9 @@ impl Lexer {
         while let Some(next) = self.next() {
             self.token_start = self.actual_pos - 1;
 
-            if next.is_alphabetic() {
+            if next == 'x' {
+                self.lex_hex();
+            } else if next.is_alphabetic() {
                 self.lex_identifier(next);
             } else if next == '\\' {
                 self.lex_replace()?;
@@ -78,17 +80,35 @@ impl Lexer {
         });
     }
 
+    fn lex_hex(&mut self) {
+        let mut hex = String::new();
+
+        while let Some(next) = self.next() {
+            if "0123456789ABCDEFabcdef".contains(next) {
+                hex.push(next);
+            } else {
+                break
+            }
+        }
+
+        if hex.is_empty() {
+            self.lex_identifier('x');
+        } else {
+            self.push(TokenType::Number(usize::from_str_radix(&hex, 16).unwrap() as f64))
+        }
+    }
+
     fn lex_identifier(&mut self, first: char) {
         let mut identifier = String::from(first);
 
         while let Some(next) = self.next() {
-            if next.is_alphabetic() || !identifier.is_empty() && next.is_ascii_digit() {
+            if next.is_alphabetic() {
                 identifier.push(next);
             } else {
                 break
             }
         }
-    
+
         self.prev();
         self.push(TokenType::Identifier(identifier));
     }
