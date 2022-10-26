@@ -232,6 +232,7 @@ impl Interpreter {
                     NodeType::Variable(name) => {
                         let id = self.check_var(name, scope, pos)?;
                         self.variables[id] = push!(operators::run_bin_op(&mut self.memory, id, value, op, pos)?);
+                        self.variables[id]
                     }
 
                     NodeType::Index { target, index } => {
@@ -256,12 +257,11 @@ impl Interpreter {
                         };
 
                         self.memory[target] = target_value;
+                        target
                     }
 
                     _ => unreachable!()
                 }
-
-                value
             }
 
             // ...
