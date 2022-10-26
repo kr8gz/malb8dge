@@ -91,6 +91,7 @@ impl Lexer {
             }
         }
 
+        self.prev();
         if hex.is_empty() {
             self.lex_identifier('x');
         } else {

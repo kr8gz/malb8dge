@@ -229,6 +229,7 @@ impl ValueType {
                 if sep.is_empty() {
                     return ret
                 }
+                
                 ret.chars()
                     .map(|c| c.to_string())
                     .intersperse(sep.into())

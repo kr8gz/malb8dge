@@ -11,10 +11,13 @@ const GREEN: Color = Color::Fixed(2);
 #[derive(Debug)]
 pub struct Interpreter {
     is_shell: bool,
+
     memory: Stack,
     variables: Vec<usize>,
     var_count: usize,
     scopes: Vec<Scope>,
+
+    functions: Vec<Function>,
     call_stack: Vec<Pos>,
 }
 
@@ -22,15 +25,16 @@ impl Interpreter {
     pub fn new(is_shell: bool) -> Self {
         Self {
             is_shell,
+
             memory: Stack::new(),
             variables: Vec::new(),
             var_count: 0,
             scopes: Vec::new(),
+
+            functions: Vec::new(),
             call_stack: Vec::new(),
         }
     }
-
-    pub 
 
     fn new_scope(&mut self, scope: usize) -> usize {
         let id = self.scopes.len();
@@ -45,8 +49,11 @@ impl Interpreter {
 
     fn check_var(&self, name: &str, scope: usize, pos: &Pos) -> Result<usize> {
         self.get_var(name, scope).ok_or_else(|| {
-            Error::err("Use of undefined variable")
-                .label(pos.clone(), format!("Variable #{name}# is not defined in this scope"))
+            let mut msg = format!("Variable #{name}# is not defined");
+            if self.scopes.iter().any(|scope| scope.vars.get(name).is_some()) {
+                msg += " in this scope";
+            }
+            Error::err("Use of undefined variable").label(pos.clone(), msg)
         })
     }
 
@@ -75,7 +82,9 @@ impl Interpreter {
         self.memory[id].as_string(&self.memory)
     }
 
-    pub fn run(&mut self, parser: Parser) -> Result<()> {
+    pub fn run(&mut self, mut parser: Parser) -> Result<()> {
+        self.functions.append(&mut parser.functions);
+
         self.scopes.push(Scope {
             vars: HashMap::new(),
             parent: None,
@@ -197,8 +206,7 @@ impl Interpreter {
                             ValueType::List(list) => list[index] = value,
                             ValueType::String(s) => {
                                 s.replace_range(
-                                    s
-                                        .char_indices()
+                                    s.char_indices()
                                         .nth(index)
                                         .map(|(pos, ch)| pos..pos + ch.len_utf8())
                                         .unwrap(),
@@ -206,6 +214,45 @@ impl Interpreter {
                                 );
                             }
                             _ => unreachable!()
+                        };
+
+                        self.memory[target] = target_value;
+                    }
+
+                    _ => unreachable!()
+                }
+
+                value
+            }
+
+            AugmentedAssign { target, op, value } => {
+                let value = self.run_node(value, scope)?;
+
+                match &target.data {
+                    NodeType::Variable(name) => {
+                        let id = self.check_var(name, scope, pos)?;
+                        self.variables[id] = push!(operators::run_bin_op(&mut self.memory, id, value, op, pos)?);
+                    }
+
+                    NodeType::Index { target, index } => {
+                        run!(target);
+                        run!(index);
+                        let index = index!(target, index);
+
+                        let mut target_value = self.memory[target].clone();
+                        match &mut target_value.data {
+                            ValueType::List(list) => {
+                                list[index] = push!(operators::run_bin_op(&mut self.memory, list[index], value, op, pos)?)
+                            }
+
+                            _ => {
+                                let type_name = target_value.type_name();
+                                return Err(
+                                    Error::err("Type error")
+                                        .label(target_value.pos, format!("This has type #{type_name}#"))
+                                        .label(pos.clone(), format!("Cannot use augmented assignment on index of type #{type_name}#"))
+                                )
+                            }
                         };
 
                         self.memory[target] = target_value;
@@ -366,7 +413,7 @@ impl Interpreter {
                     .collect::<Result<_>>()?
             )),
 
-            Variable(name) => self.check_var(name, scope, pos)?,
+            Variable(name) => self.variables[self.check_var(name, scope, pos)?],
 
             FragmentString(frags) => push!(ValueType::String(
                 frags.iter()

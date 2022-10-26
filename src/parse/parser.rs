@@ -5,12 +5,13 @@ use ariadne::{Fmt, Color::*};
 use crate::{parse::ast::*, util::{*, errors::*, operators::{self, *, OpType::*}}, lex::{lexer::*, tokens::*}, run::types::ValueType};
 
 #[derive(Debug)]
-pub struct Parser {
+pub struct Parser<'a> {
     pub eof: usize,
     pub tokens: Vec<Token>,
 
     pub statements: Vec<Node>,
     pub functions: Vec<Function>,
+    fn_count: &'a mut usize,
 
     token_index: usize,
 
@@ -21,14 +22,15 @@ pub struct Parser {
     in_loop: bool,
 }
 
-impl Parser {
-    pub fn new(lexer: Lexer) -> Self {
+impl<'a> Parser<'a> {
+    pub fn new(lexer: Lexer, fn_count: &'a mut usize) -> Self {
         Self {
             eof: lexer.tokens.last().map(|t| t.pos.end).unwrap_or(0),
             tokens: lexer.tokens,
 
             statements: Vec::new(),
             functions: Vec::new(),
+            fn_count,
 
             token_index: 0,
 
@@ -424,9 +426,10 @@ impl Parser {
         let args = self.check_var_list(args, false, "function definition", "argument name")?;
         let block = self.with_func(|s| s.parse_statement(false))?.unwrap();
         self.functions.push(Function { args, block });
-        Ok(NodeType::Function {
-            index: self.functions.len() - 1,
-        })
+
+        let func = NodeType::Function { index: *self.fn_count };
+        *self.fn_count += 1;
+        Ok(func)
     }
 
     fn parse_for_while_loop(&mut self, expr: Node) -> Result<NodeType> {
@@ -502,7 +505,7 @@ impl Parser {
             LexedFragment::Literal(lit) => ParsedFragment::Literal(lit),
             LexedFragment::Expr(lexer) => {
                 let pos = lexer.actual_pos - lexer.char_index..lexer.actual_pos;
-                let mut parser = Self::new(lexer);
+                let mut parser = Parser::new(lexer, self.fn_count);
                 parser.parse()?;
                 ParsedFragment::Expr(Node {
                     data: NodeType::Statements(parser.statements),

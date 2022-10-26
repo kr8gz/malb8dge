@@ -57,6 +57,7 @@ fn main() {
     };
     
     let mut code = String::new();
+    let mut fn_count = 0;
     let mut interpreter = Interpreter::new(is_shell);
 
     macro_rules! handle {
@@ -72,11 +73,11 @@ fn main() {
     }
 
     macro_rules! run {
-        ( $eval:expr, $offset:expr ) => {
-            let mut lexer = Lexer::new(&$eval, $offset);
+        ( $code:ident, $offset:expr ) => {
+            let mut lexer = Lexer::new(&$code, $offset);
             handle!(lexer.lex() => {
                 if debug || debug_lexer { println!("{:#?}", &lexer); }
-                let mut parser = Parser::new(lexer);
+                let mut parser = Parser::new(lexer, &mut fn_count);
                 handle!(parser.parse() => {
                     if debug || debug_parser { println!("{:#?}", &parser); }
                     handle!(interpreter.run(parser) => {
@@ -121,7 +122,9 @@ fn main() {
     }
     
     else {
-        code = fs::read_to_string(&file).unwrap_or_else(|err| Error::simple(err));
-        run!(code.replace("\r\n", "\n"), 0);
+        code = fs::read_to_string(&file)
+            .unwrap_or_else(|err| Error::simple(err))
+            .replace("\r\n", "\n");
+        run!(code, 0);
     }
 }
