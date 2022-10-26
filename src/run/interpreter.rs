@@ -135,7 +135,7 @@ impl Interpreter {
 
                     let mut i = index.data.as_int().ok_or_else(|| {
                         Error::err("Type error")
-                            .label(pos.start..index.pos.start, "Expected an integer for list index")
+                            .label(pos.clone(), "Expected an integer for list index")
                             .label(index.pos.clone(), format!("Cannot convert #{}# to an integer", index.as_repr_string(&self.memory)))
                     })?;
 
@@ -144,7 +144,7 @@ impl Interpreter {
                         ValueType::String(s) => s.len() as f64,
                         _ => return Err(
                             Error::err("Type error")
-                                .label(target.pos.end..pos.end, "Expected a list to index")
+                                .label(pos.clone(), "Expected a list to index")
                                 .label(target.pos.clone(), format!("Cannot convert #{}# to a list", target.as_repr_string(&self.memory)))
                         )
                     };
@@ -164,33 +164,11 @@ impl Interpreter {
             }
         }
 
-        let value = match data {
-            Statements(stmts) => {
-                if let Some((last, rest)) = stmts.split_last() {
-                    let inner = self.new_scope(scope);
-                    for stmt in rest {
-                        self.run_node(stmt, inner)?;
-                    }
-                    self.run_node(last, inner)?
-                } else {
-                    push!(ValueType::Null())
-                }
-            }
+        macro_rules! assign {
+            ( $target:ident, $value:expr ) => {
+                let value = $value;
 
-            // ...
-
-            Exit(expr) => {
-                if let Some(expr) = expr.as_ref() {
-                    run!(expr);
-                    println!("{}", self.id_to_str(expr));
-                }
-                process::exit(0)
-            }
-
-            Assign { target, value } => {
-                let value = self.run_node(value, scope)?;
-
-                match &target.data {
+                match &$target.data {
                     NodeType::Variable(name) => {
                         let id = self.get_var(name, scope).unwrap_or_else(|| self.new_var(name, pos, scope));
                         self.variables[id] = value;
@@ -221,7 +199,35 @@ impl Interpreter {
 
                     _ => unreachable!()
                 }
+            }
+        }
 
+        Ok(match data {
+            Statements(stmts) => {
+                if let Some((last, rest)) = stmts.split_last() {
+                    let inner = self.new_scope(scope);
+                    for stmt in rest {
+                        self.run_node(stmt, inner)?;
+                    }
+                    self.run_node(last, inner)?
+                } else {
+                    push!(ValueType::Null())
+                }
+            }
+
+            // ...
+
+            Exit(expr) => {
+                if let Some(expr) = expr.as_ref() {
+                    run!(expr);
+                    println!("{}", self.id_to_str(expr));
+                }
+                process::exit(0)
+            }
+
+            Assign { target, value } => {
+                run!(value);
+                assign!(target, value);
                 value
             }
 
@@ -231,7 +237,7 @@ impl Interpreter {
                 match &target.data {
                     NodeType::Variable(name) => {
                         let id = self.check_var(name, scope, pos)?;
-                        self.variables[id] = push!(operators::run_bin_op(&mut self.memory, id, value, op, pos)?);
+                        self.variables[id] = push!(operators::run_bin_op(&mut self.memory, self.variables[id], value, op, pos)?);
                         self.variables[id]
                     }
 
@@ -239,11 +245,12 @@ impl Interpreter {
                         run!(target);
                         run!(index);
                         let index = index!(target, index);
-
                         let mut target_value = self.memory[target].clone();
-                        match &mut target_value.data {
+
+                        let ret = match &mut target_value.data {
                             ValueType::List(list) => {
-                                list[index] = push!(operators::run_bin_op(&mut self.memory, list[index], value, op, pos)?)
+                                list[index] = push!(operators::run_bin_op(&mut self.memory, list[index], value, op, pos)?);
+                                list[index]
                             }
 
                             _ => {
@@ -257,11 +264,39 @@ impl Interpreter {
                         };
 
                         self.memory[target] = target_value;
-                        target
+                        ret
                     }
 
                     _ => unreachable!()
                 }
+            }
+
+            MultipleAssign { targets, targets_pos, value } => {
+                run!(value);
+                let value = &self.memory[value];
+                let values = value.as_list(&self.memory, pos).ok_or_else(|| {
+                    Error::err("Type error")
+                        .label(pos.clone(), "Expected a list to unpack")
+                        .label(value.pos.clone(), format!("Cannot convert #{}# to a list", value.as_repr_string(&self.memory)))
+                })?;
+
+                if targets.len() != values.len() {
+                    return Err(
+                        Error::err("Value error")
+                            .label(pos.clone(), "Expected lists of equal length for multiple assignment")
+                            .label(targets_pos.clone(), format!("This has length #{}#", targets.len()))
+                            .label(value.pos.clone(), format!("This has length #{}#", values.len()))
+                    )
+                }
+
+                let mut list = Vec::new();
+                for (target, value) in targets.iter().zip(values) {
+                    let value = self.memory.push(value);
+                    assign!(target, value);
+                    list.push(value);
+                }
+
+                push!(ValueType::List(list))
             }
 
             // ...
@@ -331,6 +366,52 @@ impl Interpreter {
                 })()?;
 
                 push!(ValueType::Boolean(res))
+            }
+
+            Increment { target, mode } => {
+                let value = push!(ValueType::Number(1.0));
+                let op = if mode.add() { "+" } else { "-" };
+
+                match &target.data {
+                    NodeType::Variable(name) => {
+                        let id = self.check_var(name, scope, pos)?;
+                        let ret = self.variables[id];
+                        self.variables[id] = push!(operators::run_bin_op(&mut self.memory, self.variables[id], value, op, pos)?);
+                        if mode.aft() { ret } else { self.variables[id] }
+                    }
+
+                    NodeType::Index { target, index } => {
+                        run!(target);
+                        run!(index);
+                        let index = index!(target, index);
+                        let mut target_value = self.memory[target].clone();
+
+                        let ret = match &mut target_value.data {
+                            ValueType::List(list) => {
+                                let ret = list[index];
+                                list[index] = push!(operators::run_bin_op(&mut self.memory, list[index], value, op, pos)?);
+                                if mode.aft() { ret } else { list[index] }
+                            }
+
+                            _ => {
+                                let type_name = target_value.type_name();
+                                return Err(
+                                    Error::err("Type error")
+                                        .label(target_value.pos, format!("This has type #{type_name}#"))
+                                        .label(
+                                            pos.clone(),
+                                            format!("Cannot {}crement index of type #{type_name}#", if mode.add() { "in" } else { "de" })
+                                        )
+                                )
+                            }
+                        };
+
+                        self.memory[target] = target_value;
+                        ret
+                    }
+
+                    _ => unreachable!()
+                }
             }
 
             // ...
@@ -430,8 +511,6 @@ impl Interpreter {
             Literal(lit) => push!(lit.clone()),
 
             _ => todo!("remove this catch-all arm when done")
-        };
-
-        Ok(value)
+        })
     }
 }

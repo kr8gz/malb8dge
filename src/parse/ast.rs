@@ -21,7 +21,7 @@ pub enum NodeType {
     Exit(ONode),
     Assign { target: BNode, value: BNode },
     AugmentedAssign { target: BNode, op: String, value: BNode },
-    MultipleAssign { targets: VNode, value: BNode },
+    MultipleAssign { targets: VNode, targets_pos: Pos, value: BNode },
     If { cond: BNode, on_true: ONode, on_false: ONode },
     For { iter: BNode, vars: VNode, mode: IterMode, block: BNode }, // x ~ [vars]  mode    ... // x ~ [vars]   [mode] { ... } //
     While { cond: BNode, mode: IterMode, block: BNode },            // x ~        [mode] ? ... // x ~          [mode] [ ... ] //
@@ -99,8 +99,6 @@ pub enum IncrMode {
 
 impl IncrMode {
     pub fn add(&self) -> bool { matches!(self, Self::AddBef | Self::AddAft) }
-    // pub fn sub(&self) -> bool { matches!(self, Self::SubBef | Self::SubAft) }
-    pub fn bef(&self) -> bool { matches!(self, Self::AddBef | Self::SubBef) }
     pub fn aft(&self) -> bool { matches!(self, Self::AddAft | Self::SubAft) }
 }
 

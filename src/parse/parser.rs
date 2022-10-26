@@ -1,7 +1,5 @@
 use std::fmt;
 
-use ariadne::{Fmt, Color::*};
-
 use crate::{parse::ast::*, util::{*, errors::*, operators::{self, *, OpType::*}}, lex::{lexer::*, tokens::*}, run::types::ValueType};
 
 #[derive(Debug)]
@@ -45,7 +43,7 @@ impl<'a> Parser<'a> {
     // ------------------------------- error helper methods -------------------------------
     fn expected(&self, pos: Pos, expected: impl fmt::Display, found: impl fmt::Display) -> Error {
         Error::err("Syntax error")
-            .label(pos, format!("Expected {}, found {}", expected.fg(Green), found.fg(Red)))
+            .label(pos, format!("Expected #{expected}#, found #{found}#"))
     }
 
     fn expected_bracket(&mut self, open_pos: Pos, bracket: &str, has_value: bool) -> Result<()> {
@@ -55,10 +53,8 @@ impl<'a> Parser<'a> {
                 Error::err("Syntax error")
                     .label(open_pos, "Opening bracket here")
                     .label(next.pos, format!(
-                        "Expected {} or '{}', found {}",
-                        if has_value { "value separator" } else { "value" }.fg(Green),
-                        bracket.fg(Green),
-                        next.value.fg(Red),
+                        "Expected #{}# or #'{bracket}'#, found #{}#",
+                        if has_value { "value separator" } else { "value" }, next.value
                     ))
             )
         }
@@ -88,7 +84,7 @@ impl<'a> Parser<'a> {
             _ => return Err(
                 Error::err("Syntax error")
                     .label(self.curr().pos, format!("Found #{found}# here"))
-                    .label(node.pos, format!("Expected {}, found {}", expected.fg(Green), node.data.fg(Red)))
+                    .label(node.pos, format!("Expected #{expected}#, found #{}#", node.data))
             )
         };
         Ok(node)
@@ -338,7 +334,7 @@ impl<'a> Parser<'a> {
                                 return Err(
                                     Error::err("Syntax error")
                                         .label(pos, format!("Found #{verb} operator# here"))
-                                        .label(val.pos, format!("Expected {}, found {}", "variable".fg(Green), val.data.fg(Red)))
+                                        .label(val.pos, format!("Expected #variable#, found #{}#", val.data))
                                         .note(format!("Only variables can be {verb}ed"))
                                 )
                             }
@@ -378,7 +374,7 @@ impl<'a> Parser<'a> {
 
         if let Token { value: TokenType::Symbol(ref sym), .. } = self.next() {
             let data = match sym.as_str() {
-                "," if !self.stop.contains(&",") => self.parse_maybe_list(Some(expr))?,
+                "," if !self.stop.contains(&",") => self.parse_maybe_list(expr_start, Some(expr))?,
 
                 "~" => self.parse_for_while_loop(expr)?,
 
@@ -392,6 +388,7 @@ impl<'a> Parser<'a> {
                     if let NodeType::List(targets) = target.data {
                         NodeType::MultipleAssign {
                             targets,
+                            targets_pos: target.pos,
                             value: Box::new(self.parse_expression(false)?.unwrap()),
                         }
                     } else {
@@ -557,7 +554,7 @@ impl<'a> Parser<'a> {
         Ok(list)
     }
 
-    fn parse_maybe_list(&mut self, first: Option<Node>) -> Result<NodeType> {
+    fn parse_maybe_list(&mut self, start_pos: usize, first: Option<Node>) -> Result<NodeType> {
         const STOPS: &[&str] = &[",", "=", ":"];
 
         let mut list: Vec<_> = first.into_iter().collect();
@@ -567,16 +564,21 @@ impl<'a> Parser<'a> {
             None => return Ok(NodeType::List(list))
         }
 
+        let mut last_node_end = self.pos_end();
+
         loop {
             let next = self.next().value;
 
             if next.is(",") {
-                list.push(self.with_stops(STOPS, |s| s.parse_expression(false))?.unwrap());
+                let node = self.with_stops(STOPS, |s| s.parse_expression(false))?.unwrap();
+                last_node_end = node.pos.end;
+                list.push(node);
             }
             
             else if next.is("=") {
                 return Ok(NodeType::MultipleAssign {
                     targets: self.check_var_list(list, true, "assignment", "target variable")?,
+                    targets_pos: start_pos..last_node_end,
                     value: Box::new(self.parse_expression(false)?.unwrap()),
                 })
             }
@@ -839,7 +841,7 @@ impl<'a> Parser<'a> {
                                 loop {
                                     let token = self.next();
 
-                                    if token.value.is("]") {
+                                    if token.value.is("]") || token.value.eof() {
                                         break if is_slice {
                                             NodeType::Slice {
                                                 target: Box::new(parsed_value),
@@ -950,7 +952,7 @@ impl<'a> Parser<'a> {
                                     return Err(
                                         Error::err("Syntax error")
                                             .label(pos, format!("Found #{verb} operator# here"))
-                                            .label(parsed_value.pos, format!("Expected {}, found {}", "variable".fg(Green), parsed_value.data.fg(Red)))
+                                            .label(parsed_value.pos, format!("Expected #variable#, found #{}#", parsed_value.data))
                                             .note(format!("Only variables can be {verb}ed"))
                                     )
                                 }

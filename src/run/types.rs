@@ -39,18 +39,6 @@ pub struct Scope {
     pub children: Vec<usize>,
 }
 
-pub trait RemoveElement<T: PartialEq> {
-    fn remove_element(&mut self, element: &T);
-}
-
-impl<T: PartialEq> RemoveElement<T> for Vec<T> {
-    fn remove_element(&mut self, element: &T) {
-        if let Some(pos) = self.iter().position(|el| el == element) {
-            self.remove(pos);
-        }
-    }
-}
-
 fn f64_to_str(num: f64) -> String {
     let s = num.to_string();
     if s == "-0" { "0".into() } else { s }
@@ -125,6 +113,10 @@ impl Value {
     pub fn as_joined_list_string(&self, memory: &Stack, sep: &str) -> String {
         self.data.as_joined_list_string(memory, sep)
     }
+
+    pub fn as_list(&self, memory: &Stack, pos: &Pos) -> Option<Vec<Value>> {
+        self.data.as_list(memory, pos)
+    }
 }
 
 macro_rules! types {
@@ -163,8 +155,8 @@ impl ValueType {
     pub fn as_int(&self) -> Option<f64> {
         match self {
             Self::List(list) => Some(list.len() as f64),
-            Self::String(s) => s.parse::<f64>().ok().map(|n| n.floor()),
-            Self::Number(num) => Some(num.floor()),
+            Self::String(s) => s.parse::<f64>().ok().map(|n| n.trunc()),
+            Self::Number(num) => Some(num.trunc()),
             Self::Boolean(true) => Some(1.0),
             Self::Boolean(false) | Self::Null() => Some(0.0),
             _ => None
@@ -235,6 +227,22 @@ impl ValueType {
                     .intersperse(sep.into())
                     .collect::<String>()
             }
+        }
+    }
+
+    pub fn as_list(&self, memory: &Stack, pos: &Pos) -> Option<Vec<Value>> {
+        match self {
+            Self::List(list) => Some(list.iter().map(|&v| memory[v].clone()).collect()),
+            Self::String(s) => Some(s.chars().map(|c| ValueType::String(c.into()).into_value(pos)).collect()),
+            Self::Number(num) => {
+                let num = *num as i64;
+                Some(
+                    if num < 0 { num+1..1 } else { 0..num }
+                        .map(|i| ValueType::Number(i as f64).into_value(pos))
+                        .collect()
+                )
+            }
+            _ => None
         }
     }
 }

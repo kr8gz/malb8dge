@@ -56,7 +56,7 @@ impl Lexer {
             self.token_start = self.actual_pos - 1;
 
             if next == 'x' {
-                self.lex_hex();
+                self.lex_hex()?;
             } else if next.is_alphabetic() {
                 self.lex_identifier(next);
             } else if next == '\\' {
@@ -80,7 +80,7 @@ impl Lexer {
         });
     }
 
-    fn lex_hex(&mut self) {
+    fn lex_hex(&mut self) -> Result<()> {
         let mut hex = String::new();
 
         while let Some(next) = self.next() {
@@ -95,8 +95,12 @@ impl Lexer {
         if hex.is_empty() {
             self.lex_identifier('x');
         } else {
-            self.push(TokenType::Number(usize::from_str_radix(&hex, 16).unwrap() as f64))
+            self.push(TokenType::Number(usize::from_str_radix(&hex, 16).map_err(|_| {
+                Error::err("Invalid hex literal")
+                    .label(self.token_start..self.actual_pos, "This integer literal is too large")
+            })? as f64))
         }
+        Ok(())
     }
 
     fn lex_identifier(&mut self, first: char) {

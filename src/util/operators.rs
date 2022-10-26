@@ -114,9 +114,9 @@ pub fn run_unary_op(memory: &mut Stack, target_id: usize, op_type: OpType, op: &
 
     let mut target = memory[target_id].clone();
             
-    let (repr, op_pos) = match op_type {
-        OpType::Before => (format!("{}x", op), pos.start..target.pos.start),
-        OpType::After => (format!("x{}", op), target.pos.end..pos.end),
+    let repr = match op_type {
+        OpType::Before => format!("{}x", op),
+        OpType::After => format!("x{}", op),
         _ => panic!("specified type isn't a unary operator")
     };
 
@@ -148,7 +148,7 @@ pub fn run_unary_op(memory: &mut Stack, target_id: usize, op_type: OpType, op: &
                             _ => return Err(
                                 Error::err("Type error")
                                     .label(target.pos.clone(), format!("This has type #{}#", target.type_name()))
-                                    .label(op_pos, format!("#{repr}# is not implemented for type #{}#", target.type_name()))
+                                    .label(pos.clone(), format!("#{repr}# is not implemented for type #{}#", target.type_name()))
                             )
                         }
                     }
@@ -171,7 +171,7 @@ pub fn run_unary_op(memory: &mut Stack, target_id: usize, op_type: OpType, op: &
                                     .label(pos.clone(), format!("Expected an integer for {op}x"))
                                     .label(target.pos.clone(), format!("Cannot convert #{}# to an integer", a.as_repr_string(memory)))
                             })? as i64;
-                            if i < 0 { i..0 } else { 0..i }.map(|i| memory.push(ValueType::Number(i as f64).into_value(pos))).collect()
+                            if i < 0 { i+1..1 } else { 0..i }.map(|i| memory.push(ValueType::Number(i as f64).into_value(pos))).collect()
                         });
             }
 
@@ -274,7 +274,7 @@ pub fn run_unary_op(memory: &mut Stack, target_id: usize, op_type: OpType, op: &
 
             "`" {
                 % convert a @ (Boolean(_) | Null()) => Number(a.as_int().unwrap());
-                Number(a) => Number(a.floor());
+                Number(a) => Number(a.trunc());
             }
         },
 
@@ -348,12 +348,11 @@ pub fn run_bin_op(memory: &mut Stack, lhs_id: usize, rhs_id: usize, op: &str, po
                             _ => {
                                 let l_type = lhs.type_name();
                                 let r_type = rhs.type_name();
-                                let op_pos = lhs.pos.end..rhs.pos.start;
                                 return Err(
                                     Error::err("Type error")
                                         .label(lhs.pos, format!("This has type #{l_type}#"))
                                         .label(rhs.pos, format!("This has type #{r_type}#"))
-                                        .label(op_pos, format!("Binary #{op}# is not implemented for types #{l_type}# and #{r_type}#"))
+                                        .label(pos.clone(), format!("Binary #{op}# is not implemented for types #{l_type}# and #{r_type}#"))
                                 )
                             }
                         }
@@ -447,8 +446,20 @@ pub fn run_bin_op(memory: &mut Stack, lhs_id: usize, rhs_id: usize, op: &str, po
             x @ (Boolean(_) | Null()) => Number(x.as_int().unwrap());
     
             % one way
-            List(mut a), List(b)    =>  List({ for el in b { a.remove_element(&el); }; a });
-            List(mut a), _          =>  List({ a.remove_element(&rhs_id); a });
+            List(mut a), List(b)    =>  List({
+                                            for b_id in b {
+                                                if let Some(pos) = a.iter().position(|&el| memory[el].data == memory[b_id].data) {
+                                                    a.remove(pos);
+                                                }
+                                            };
+                                            a
+                                        });
+            List(mut a), _          =>  List({
+                                            if let Some(pos) = a.iter().position(|&el| memory[el].data == memory[rhs_id].data) {
+                                                a.remove(pos);
+                                            }
+                                            a
+                                        });
     
             String(a),  String(b)   =>  String({
                                             if a.len() == 1 && b.len() == 1 {
@@ -496,7 +507,7 @@ pub fn run_bin_op(memory: &mut Stack, lhs_id: usize, rhs_id: usize, op: &str, po
             List(a),    Number(b)   =>  List({
                                             let mut res = Vec::new();
                                             for _ in 0..b.abs() as usize {
-                                                res.extend(a.clone());
+                                                res.extend(a.iter().map(|&v| memory.push(memory[v].clone())));
                                             }
                                             if b < 0.0 { res.reverse(); }
                                             res
