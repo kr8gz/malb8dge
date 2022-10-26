@@ -414,7 +414,9 @@ impl Interpreter {
                 }
             }
 
-            // ...
+            // FnCall { target, args } => {
+            //    
+            // }
 
             Index { target, index } => {
                 run!(target);
