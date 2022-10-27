@@ -1,4 +1,7 @@
+use std::cmp::Ordering;
+
 use itertools::Itertools;
+use rand::Rng;
 
 use crate::run::types::*;
 
@@ -176,7 +179,8 @@ pub fn run_unary_op(memory: &mut Stack, target_id: usize, op_type: OpType, op: &
             }
 
             "?\\" {
-
+                % convert a @ (Boolean(_) | Null()) => Number(a.as_int().unwrap());
+                Number(a) => Number(rand::thread_rng().gen_range(0.min(a as i64)..=0.max(a as i64)) as f64);
             }
 
             "-" {
@@ -363,13 +367,16 @@ pub fn run_bin_op(memory: &mut Stack, lhs_id: usize, rhs_id: usize, op: &str, po
         }
     }
 
+    #[macro_export]
     macro_rules! unique {
-        ( $iter:expr ) => {
+        ( $memory:expr, $iter:expr ) => {
             {
+                let mut seen = Vec::new();
                 let mut unique = Vec::new();
                 for el in $iter {
-                    if !unique.contains(&el) {
+                    if !seen.contains(&$memory[el].data) {
                         unique.push(el);
+                        seen.push($memory[el].data.clone());
                     }
                 }
                 unique
@@ -414,8 +421,8 @@ pub fn run_bin_op(memory: &mut Stack, lhs_id: usize, rhs_id: usize, op: &str, po
             % convert
             x @ (Boolean(_) | Null()) => Number(x.as_int().unwrap());
     
-            // % one way
-            // Number(a),  Number(b)   =>  Number( random number from a to b ); // what about floats
+            % one way
+            Number(a),  Number(b)   => Number(rand::thread_rng().gen_range(a.min(b) as i64..=a.max(b) as i64) as f64);
         }
     
         "%" {
@@ -501,7 +508,7 @@ pub fn run_bin_op(memory: &mut Stack, lhs_id: usize, rhs_id: usize, op: &str, po
     
             % one way
             Number(a),  Number(b)   =>  Number(a * b);
-            List(a),    List(b)     =>  List(unique!(a.into_iter().chain(b.into_iter())));
+            List(a),    List(b)     =>  List(unique!(memory, a.into_iter().chain(b.into_iter())));
     
             % both ways
             List(a),    Number(b)   =>  List({
@@ -526,7 +533,7 @@ pub fn run_bin_op(memory: &mut Stack, lhs_id: usize, rhs_id: usize, op: &str, po
     
             % one way
             Number(a),  Number(b)   =>  Number(a / b);
-            List(a),    List(b)     =>  List(unique!(a.iter().chain(b.iter()).cloned().filter(|id| a.contains(id) && b.contains(id))));
+            List(a),    List(b)     =>  List(unique!(memory, a.iter().chain(b.iter()).cloned().filter(|id| a.contains(id) && b.contains(id))));
         }
     
         "//" {
@@ -559,18 +566,26 @@ pub fn run_bin_op(memory: &mut Stack, lhs_id: usize, rhs_id: usize, op: &str, po
     
             % one way
             Number(a),  Number(b)   =>  Number(a.powf(b));
-            List(a),    List(b)     =>  List(unique!(a.iter().chain(b.iter()).cloned().filter(|id| a.contains(id) != b.contains(id))));
+            List(a),    List(b)     =>  List(unique!(memory, a.iter().chain(b.iter()).cloned().filter(|id| a.contains(id) != b.contains(id))));
             
             List(a),    String(b)   =>  String(a.into_iter().map(|el| memory[el].as_string(memory)).join(&b));
             String(a),  String(b)   =>  String(a.chars().map(|c| c.to_string()).intersperse(b).collect());
         }
     
         ".*" {
-    
+            % one way
+            a, b => match lhs.compare(&rhs, pos)? {
+                Ordering::Less | Ordering::Equal => a,
+                _ => b
+            };
         }
     
         "^*" {
-            
+            % one way
+            a, b => match lhs.compare(&rhs, pos)? {
+                Ordering::Greater => a,
+                _ => b
+            };
         }
     
         "@" {

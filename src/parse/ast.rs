@@ -147,6 +147,7 @@ enum_modes! {
     Map: "~",
     Unique: "/",
     Print: ";",
+    PrintNoSpaces: "\\",
     SortAsc: "<",
     SortDesc: ">",
     Filter: "-",

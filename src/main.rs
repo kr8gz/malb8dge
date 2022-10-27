@@ -123,7 +123,10 @@ fn main() {
     
     else {
         code = fs::read_to_string(&file)
-            .unwrap_or_else(|err| Error::simple(err))
+            .unwrap_or_else(|_| {
+                fs::read_to_string(file.clone() + ".mlb8")
+                    .unwrap_or_else(|err| Error::simple(err))
+            })
             .replace("\r\n", "\n");
         run!(code, 0);
     }

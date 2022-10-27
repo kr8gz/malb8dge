@@ -6,8 +6,6 @@ use crate::{util::{*, errors::Error, operators::OpType}, parse::{parser::Parser,
 
 use super::types::*;
 
-const GREEN: Color = Color::Fixed(2);
-
 #[derive(Debug)]
 pub struct Interpreter {
     is_shell: bool,
@@ -19,6 +17,10 @@ pub struct Interpreter {
 
     functions: Vec<Function>,
     call_stack: Vec<Pos>,
+
+    _return: bool,
+    _break: bool,
+    _continue: bool,
 }
 
 impl Interpreter {
@@ -33,6 +35,10 @@ impl Interpreter {
 
             functions: Vec::new(),
             call_stack: Vec::new(),
+
+            _return: false,
+            _break: false,
+            _continue: false,
         }
     }
 
@@ -82,6 +88,14 @@ impl Interpreter {
         self.memory[id].as_string(&self.memory)
     }
 
+    fn shell_green(&self, s: String) -> String {
+        if self.is_shell {
+            s.fg(Color::Green).to_string()
+        } else {
+            s
+        }
+    }
+
     pub fn run(&mut self, mut parser: Parser) -> Result<()> {
         self.functions.append(&mut parser.functions);
 
@@ -91,22 +105,110 @@ impl Interpreter {
             children: Vec::new(),
         });
 
-        if let Some((last, rest)) = parser.statements.split_last() {
-            for stmt in rest {
-                self.run_node(stmt, 0)?;
+        if self.is_shell {
+            if let Some((last, rest)) = parser.statements.split_last() {
+                for stmt in rest {
+                    self.run_node(stmt, 0)?;
+                }
+                let id = self.run_node(last, 0)?;
+                let value = &self.memory[id];
+                if !matches!(value.data, ValueType::Null()) {
+                    println!("{}", value.as_repr_string(&self.memory).fg(Color::Fixed(14))); // light blue
+                }
             }
-
-            let id = self.run_node(last, 0)?;
-            let mut value = self.id_to_str(id);
-            if !matches!(last.data, NodeType::Print { .. }) {
-                if self.is_shell {
-                    value = value.fg(GREEN).to_string()
-                };
-                println!("{value}");
+        } else {
+            for stmt in &parser.statements {
+                self.run_node(stmt, 0)?;
             }
         }
 
         Ok(())
+    }
+
+    fn run_iter_mode(&mut self, mode: &IterMode, list: Vec<usize>, pos: &Pos) -> Result<usize> {
+        use IterMode::*;
+
+        macro_rules! push {
+            ( $value:expr ) => {
+                {
+                    let value = $value.into_value(pos);
+                    self.memory.push(value)
+                }
+            }
+        }
+
+        macro_rules! op_reduce {
+            ( $op:literal ) => {
+                match list.split_first() {
+                    Some((first, rest)) => {
+                        rest.iter().copied()
+                            .try_fold(*first, |a, b| {
+                                let value = operators::run_bin_op(&mut self.memory, a, b, $op, pos)?;
+                                Ok(push!(value))
+                            })?
+                    }
+                    None => push!(ValueType::Null())
+                }
+            }
+        }
+
+        Ok(match mode {
+            Sum => op_reduce!("+"),
+            Product => op_reduce!("*"),
+            All => op_reduce!("&"),
+            AllBool => op_reduce!("&&"),
+            Any => op_reduce!("|"),
+            AnyBool => op_reduce!("||"),
+
+            AllEqual => push!(ValueType::Boolean(crate::unique!(self.memory, list).len() == 1)),
+            AllUnequal => push!(ValueType::Boolean(list.len() == crate::unique!(self.memory, list).len())),
+            
+            Min => op_reduce!(".*"),
+            Max => op_reduce!("^*"),
+
+            MostFreq => {
+                let mut counts = HashMap::new();
+                for id in list {
+                    *counts.entry(id).or_insert(0) += 1;
+                }
+                counts.into_iter().max_by_key(|(_, count)| *count).map(|(id, _)| id).unwrap_or(0)
+            }
+
+            Default | Map => push!(ValueType::List(list)),
+            Unique => push!(ValueType::List(crate::unique!(self.memory, list))),
+            
+            Print => {
+                for id in list {
+                    let value = self.memory[id].as_joined_list_string(&self.memory, "");
+                    println!("{}", self.shell_green(value));
+                }
+                push!(ValueType::Null())
+            }
+            PrintNoSpaces => {
+                for id in list {
+                    let value = self.memory[id].as_joined_list_string(&self.memory, "");
+                    print!("{}", self.shell_green(value));
+                }
+                push!(ValueType::Null())
+            }
+
+            SortAsc => {
+                // list.sort_by(|a, b| self.memory[a].compare(&self.memory[b], pos));
+                // push!(ValueType::List(list))
+                todo!("sort asc")
+            }
+
+            SortDesc => {
+                // list.sort_by(|a, b| self.memory[a].compare(&self.memory[b], pos));
+                // list.reverse();
+                // push!(ValueType::List(list))
+                todo!("sort desc")
+            }
+
+            Filter => {
+                push!(ValueType::List(list.into_iter().filter(|&v| self.memory[v].as_bool()).collect()))
+            }
+        })
     }
 
     fn run_node(&mut self, node: &Node, scope: usize) -> Result<usize> {
@@ -124,7 +226,16 @@ impl Interpreter {
         }
 
         macro_rules! run {
-            ( $var:ident ) => { let $var = self.run_node($var, scope)?; }
+            ( $var:ident ) => {
+                let $var = self.run_node($var, scope)?;
+            };
+
+            ( $var:ident or null ) => {
+                match $var.as_ref() {
+                    Some($var) => self.run_node($var, scope)?,
+                    None => push!(ValueType::Null())
+                }
+            };
         }
         
         macro_rules! index {
@@ -215,12 +326,28 @@ impl Interpreter {
                 }
             }
 
-            // ...
+            Return(expr) => {
+                let ret = run!(expr or null);
+                self._return = true;
+                ret
+            }
+
+            Break(expr) => {
+                let ret = run!(expr or null);
+                self._break = true;
+                ret
+            }
+
+            Continue(expr) => {
+                let ret = run!(expr or null);
+                self._continue = true;
+                ret
+            }
 
             Exit(expr) => {
                 if let Some(expr) = expr.as_ref() {
                     run!(expr);
-                    println!("{}", self.id_to_str(expr));
+                    println!("{}", self.shell_green(self.id_to_str(expr)));
                 }
                 process::exit(0)
             }
@@ -273,8 +400,8 @@ impl Interpreter {
 
             MultipleAssign { targets, targets_pos, value } => {
                 run!(value);
-                let value = &self.memory[value];
-                let values = value.as_list(&self.memory, pos).ok_or_else(|| {
+                let value = self.memory[value].clone();
+                let values = value.as_list(&mut self.memory, pos).ok_or_else(|| {
                     Error::err("Type error")
                         .label(pos.clone(), "Expected a list to unpack")
                         .label(value.pos.clone(), format!("Cannot convert #{}# to a list", value.as_repr_string(&self.memory)))
@@ -291,7 +418,6 @@ impl Interpreter {
 
                 let mut list = Vec::new();
                 for (target, value) in targets.iter().zip(values) {
-                    let value = self.memory.push(value);
                     assign!(target, value);
                     list.push(value);
                 }
@@ -313,6 +439,20 @@ impl Interpreter {
             }
 
             // ...
+
+            Loop { mode, block } => {
+                let mut ret = Vec::new();
+                loop {
+                    let value = self.run_node(block, scope)?;
+                    ret.push(value);
+
+                    if self._break {
+                        break self.run_iter_mode(mode, ret, pos)?
+                    } else if self._return {
+                        break value
+                    }
+                }
+            }
 
             Function { index } => push!(ValueType::Function(*index)),
 
@@ -336,18 +476,7 @@ impl Interpreter {
                         run!(second);
                         let second_value = self.memory[second].clone();
 
-                        let ord = first_value.partial_cmp(&second_value).ok_or_else(|| {
-                            let l_type = first_value.type_name();
-                            let r_type = second_value.type_name();
-                            Error::err("Type error")
-                                .label(first_value.pos.clone(), format!("This has type #{l_type}#"))
-                                .label(second_value.pos.clone(), format!("This has type #{r_type}#"))
-                                .label(
-                                    pos.clone(),
-                                    format!("Cannot compare types #{l_type}# and #{r_type}#")
-                                )
-                        })?;
-
+                        let ord = first_value.compare(&second_value, pos)?;
                         let res = match op.as_str() {
                             "<" => ord.is_lt(),
                             ">" => ord.is_gt(),
@@ -432,24 +561,33 @@ impl Interpreter {
 
             // ...
 
+            BraceIter { target, mode } => {
+                run!(target);
+                let target = self.memory[target].clone();
+                let list = target.as_list(&mut self.memory, pos).ok_or_else(|| {
+                    Error::err("Type error")
+                        .label(pos.clone(), "Expected a list for brace iterating thing")
+                        .label(target.pos.clone(), format!("Cannot convert #{}# to a list", target.as_repr_string(&self.memory)))
+                })?;
+                self.run_iter_mode(mode, list, pos)?
+            }
+
+            // ...
+
             Print { value, mode } => {
                 use PrintMode::*;
                 let value = self.run_node(value, scope)?;
 
                 macro_rules! fmt {
-                    ( $sep:literal ) => { self.memory[value].as_joined_list_string(&self.memory, $sep) }
+                    ( $sep:literal ) => { self.shell_green(self.memory[value].as_joined_list_string(&self.memory, $sep)) }
                 }
 
-                let mut formatted_value = match mode {
+                let formatted_value = match mode {
                     Default      => fmt!(""),
                     NoNewline    => fmt!(""),
                     Spaces       => fmt!(" "),
                     SplitNewline => fmt!("\n"),
                 };
-
-                if self.is_shell {
-                    formatted_value = formatted_value.fg(GREEN).to_string();
-                }
                 
                 match mode {
                     NoNewline => print!("{formatted_value}"),
@@ -464,7 +602,7 @@ impl Interpreter {
 
                 if let Some(prompt) = prompt.as_ref() {
                     run!(prompt);
-                    print!("{}", self.id_to_str(prompt));
+                    print!("{}", self.shell_green(self.id_to_str(prompt)));
                     io::stdout().flush().expect("hgow did not can flush prompt :>(");
                 }
 

@@ -2,7 +2,7 @@ use std::{cmp::Ordering, collections::HashMap, ops::{Index, IndexMut}};
 
 use itertools::Itertools;
 
-use crate::util::Pos;
+use crate::util::{*, errors::Error};
 
 #[derive(Debug)]
 pub struct Stack(Vec<Value>);
@@ -50,44 +50,54 @@ pub struct Value {
     pub pos: Pos,
 }
 
-impl PartialOrd for Value {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        use ValueType::*;
-
-        match (&self.data, &other.data) {
-            (List(a), List(b)) => a.partial_cmp(b),
-            (String(a), String(b)) => a.partial_cmp(b),
-
-            (String(a), Number(b)) => match a.parse::<f64>() {
-                Ok(a) => a.partial_cmp(b),
-                _ => a.partial_cmp(&f64_to_str(*b))
-            }
-
-            (Number(a), String(b)) => match b.parse::<f64>() {
-                Ok(b) => a.partial_cmp(&b),
-                _ => f64_to_str(*a).partial_cmp(b)
-            }
-
-            (String(a), Boolean(b)) => match a.parse::<bool>() {
-                Ok(a) => a.partial_cmp(b),
-                _ => a.partial_cmp(&b.to_string())
-            }
-
-            (Boolean(a), String(b)) => match b.parse::<bool>() {
-                Ok(b) => a.partial_cmp(&b),
-                _ => a.to_string().partial_cmp(b)
-            }
-
-            (String(a), Null()) => a.as_str().partial_cmp(""),
-            (Null(), String(b)) => "".partial_cmp(b),
-            (a, b) => a.as_num()?.partial_cmp(&b.as_num()?)
-        }
-    }
-}
-
 impl Value {
     pub fn type_name(&self) -> String {
         self.data.type_name()
+    }
+
+    pub fn compare(&self, other: &Self, pos: &Pos) -> Result<Ordering> {
+        use ValueType::*;
+        
+        fn compare(a: &ValueType, b: &ValueType) -> Option<Ordering> {
+            match (a, b) {
+                (List(a), List(b)) => a.partial_cmp(b),
+                (String(a), String(b)) => a.partial_cmp(b),
+
+                (String(a), Number(b)) => match a.parse::<f64>() {
+                    Ok(a) => a.partial_cmp(b),
+                    _ => a.partial_cmp(&f64_to_str(*b))
+                }
+
+                (Number(a), String(b)) => match b.parse::<f64>() {
+                    Ok(b) => a.partial_cmp(&b),
+                    _ => f64_to_str(*a).partial_cmp(b)
+                }
+
+                (String(a), Boolean(b)) => match a.parse::<bool>() {
+                    Ok(a) => a.partial_cmp(b),
+                    _ => a.partial_cmp(&b.to_string())
+                }
+
+                (Boolean(a), String(b)) => match b.parse::<bool>() {
+                    Ok(b) => a.partial_cmp(&b),
+                    _ => a.to_string().partial_cmp(b)
+                }
+
+                (String(a), Null()) => a.as_str().partial_cmp(""),
+                (Null(), String(b)) => "".partial_cmp(b),
+                (a, b) => a.as_num()?.partial_cmp(&b.as_num()?)
+            }
+        }
+
+        compare(&self.data, &other.data).ok_or_else(|| {
+            Error::err("Type error")
+                .label(self.pos.clone(), format!("This has type #{}#", self.type_name()))
+                .label(other.pos.clone(), format!("This has type #{}#", other.type_name()))
+                .label(
+                    pos.clone(),
+                    format!("Cannot compare types #{}# and #{}#", self.type_name(), other.type_name())
+                )
+        })
     }
 
     pub fn as_int(&self) -> Option<f64> {
@@ -114,7 +124,7 @@ impl Value {
         self.data.as_joined_list_string(memory, sep)
     }
 
-    pub fn as_list(&self, memory: &Stack, pos: &Pos) -> Option<Vec<Value>> {
+    pub fn as_list(&self, memory: &mut Stack, pos: &Pos) -> Option<Vec<usize>> {
         self.data.as_list(memory, pos)
     }
 }
@@ -146,7 +156,7 @@ types! {
     Boolean(bool),
     Null(),
 }
-        
+
 impl ValueType {
     pub fn into_value(self, pos: &Pos) -> Value {
         Value { data: self, pos: pos.clone() }
@@ -230,7 +240,7 @@ impl ValueType {
         }
     }
 
-    pub fn as_list(&self, memory: &Stack, pos: &Pos) -> Option<Vec<Value>> {
+    pub fn as_list(&self, memory: &mut Stack, pos: &Pos) -> Option<Vec<usize>> {
         match self {
             Self::List(list) => Some(list.iter().map(|&v| memory[v].clone()).collect()),
             Self::String(s) => Some(s.chars().map(|c| ValueType::String(c.into()).into_value(pos)).collect()),
@@ -243,6 +253,6 @@ impl ValueType {
                 )
             }
             _ => None
-        }
+        }.map(|v: Vec<_>| v.into_iter().map(|v| memory.push(v)).collect())
     }
 }
