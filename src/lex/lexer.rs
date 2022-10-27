@@ -97,7 +97,7 @@ impl Lexer {
         } else {
             self.push(TokenType::Number(usize::from_str_radix(&hex, 16).map_err(|_| {
                 Error::err("Invalid hex literal")
-                    .label(self.token_start..self.actual_pos, "This integer literal is too large")
+                    .label(self.token_start..self.actual_pos, "This integer literal is too large (\"like ur mom😂😂🤣🤣🤣\" -bombie 2022)")
             })? as f64))
         }
         Ok(())
