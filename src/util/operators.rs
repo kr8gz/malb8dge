@@ -442,10 +442,10 @@ pub fn run_bin_op(memory: &mut Stack, lhs_id: usize, rhs_id: usize, op: &str, po
             List(a),    List(b)     =>  List(a.into_iter().chain(b.into_iter()).collect());
             String(a),  String(b)   =>  String(a + &b);
             String(a),  b @ List(_) =>  String(a + &b.as_joined_list_string(memory, ""));
-    
-            % both ways
+            
             List(a),    _           =>  List(a.into_iter().chain([rhs_id]).collect());
             String(a),  _           =>  String(a + &rhs.as_string(memory));
+            _,          String(b)   =>  String(lhs.as_string(memory) + &b);
         }
     
         "-" {
