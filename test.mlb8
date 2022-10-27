@@ -1,0 +1,16 @@
+;"Guess the number!"
+
+number = 1 ?\ 100
+
+? {
+    guess = _("Your guess: ")
+
+    guess < number ? {
+        ;"Too low!"
+    } ! guess > number ? {
+        ;"Too high!"
+    } ! {
+        ;"You guessed the number!"
+        %
+    }
+}

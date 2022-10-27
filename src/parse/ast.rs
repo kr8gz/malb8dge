@@ -130,6 +130,8 @@ macro_rules! enum_modes {
 enum_modes! {
     IterMode
 
+    // ( ) [ ] { } as mode symbols are free
+
     // returns value
     Sum: "+",
     Product: "*",
@@ -147,7 +149,7 @@ enum_modes! {
     Map: "~",
     Unique: "/",
     Print: ";",
-    PrintNoSpaces: "\\",
+    PrintNoSpaces: "%",
     SortAsc: "<",
     SortDesc: ">",
     Filter: "-",

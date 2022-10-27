@@ -6,6 +6,24 @@ use crate::{util::{*, errors::Error, operators::OpType}, parse::{parser::Parser,
 
 use super::types::*;
 
+macro_rules! _print {
+    ( $interpreter:ident, $($arg:tt)* ) => {
+        {
+            print!($($arg)*);
+            $interpreter.no_nl = true;
+        }
+    }
+}
+
+macro_rules! _println {
+    ( $interpreter:ident, $($arg:tt)* ) => {
+        {
+            println!($($arg)*);
+            $interpreter.no_nl = false;
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Interpreter {
     is_shell: bool,
@@ -21,6 +39,8 @@ pub struct Interpreter {
     _return: bool,
     _break: bool,
     _continue: bool,
+
+    no_nl: bool,
 }
 
 impl Interpreter {
@@ -39,6 +59,8 @@ impl Interpreter {
             _return: false,
             _break: false,
             _continue: false,
+
+            no_nl: false,
         }
     }
 
@@ -110,8 +132,15 @@ impl Interpreter {
                 for stmt in rest {
                     self.run_node(stmt, 0)?;
                 }
+                
                 let id = self.run_node(last, 0)?;
                 let value = &self.memory[id];
+
+                if self.no_nl {
+                    println!();
+                    self.no_nl = false;
+                }
+
                 if !matches!(value.data, ValueType::Null()) {
                     println!("{}", value.as_repr_string(&self.memory).fg(Color::Fixed(14))); // light blue
                 }
@@ -180,14 +209,14 @@ impl Interpreter {
             Print => {
                 for id in list {
                     let value = self.memory[id].as_joined_list_string(&self.memory, "");
-                    println!("{}", self.shell_green(value));
+                    _println!(self, "{}", self.shell_green(value));
                 }
                 push!(ValueType::Null())
             }
             PrintNoSpaces => {
                 for id in list {
                     let value = self.memory[id].as_joined_list_string(&self.memory, "");
-                    print!("{}", self.shell_green(value));
+                    _print!(self, "{}", self.shell_green(value));
                 }
                 push!(ValueType::Null())
             }
@@ -347,7 +376,7 @@ impl Interpreter {
             Exit(expr) => {
                 if let Some(expr) = expr.as_ref() {
                     run!(expr);
-                    println!("{}", self.shell_green(self.id_to_str(expr)));
+                    _println!(self, "{}", self.shell_green(self.id_to_str(expr)));
                 }
                 process::exit(0)
             }
@@ -590,8 +619,8 @@ impl Interpreter {
                 };
                 
                 match mode {
-                    NoNewline => print!("{formatted_value}"),
-                    _ => println!("{formatted_value}")
+                    NoNewline => _print!(self, "{formatted_value}"),
+                    _ => _println!(self, "{formatted_value}")
                 }
 
                 value
@@ -602,7 +631,7 @@ impl Interpreter {
 
                 if let Some(prompt) = prompt.as_ref() {
                     run!(prompt);
-                    print!("{}", self.shell_green(self.id_to_str(prompt)));
+                    _print!(self, "{}", self.shell_green(self.id_to_str(prompt)));
                     io::stdout().flush().expect("hgow did not can flush prompt :>(");
                 }
 
