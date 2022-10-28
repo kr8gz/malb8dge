@@ -19,7 +19,7 @@ number = 1 ?\ 100
 }
 ```
 We could easily remove almost half of the characters by deleting unnecessary spaces and newlines, but that would make the code pretty unreadable very fast - so we'll do that later.
-What we can do instead is trying to compact the parts inside of the curly brackets (`{ ... }`) to single statements, so that we can remove the brackets entirely.
+What we can do instead is trying to compact the parts inside of the curly brackets to single statements, so that we can remove the brackets entirely.
 
 First, let's look at this part:
 ```

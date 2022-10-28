@@ -9,7 +9,7 @@ You might know this as a `while true` loop from other programming languages, but
 }
 ```
 
-All our following instructions will go inside of this loop, i.e. between the `{` and `}`, since we want the player to have infinitely many tries to guess our secret number.
+All our following instructions will go inside of this loop, i.e. between the curly braces, since we want the player to have infinitely many tries to guess our secret number.
 
 ## Getting the player's input
 We can get the player's guesses by using `_`, which will wait for the user to input something and return the input as text.

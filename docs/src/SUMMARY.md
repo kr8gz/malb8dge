@@ -13,6 +13,7 @@
 - [Compacting code](03-00-compacting-code.md)
     - [Inlining everything](03-01-inlining-everything.md)
     - [Looking for repetitions](03-02-looking-for-repetitions.md)
+    - [Removing all formatting](03-03-removing-all-formatting.md)
 
 ---
 # other stuffs

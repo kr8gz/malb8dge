@@ -20,7 +20,7 @@ guess > number ? {
 As you may have noticed, the `?` (which in this case stands for "if" as opposed to the infinite loop from [earlier](02-02-loops-and-input.md#creating-a-loop)) comes after the specified condition.
 After that comes a block with the code we want to run when that condition is met.
 The `!` after the block means "else", which is followed by another block with the code we want to run when the condition is not met.
-In the code example above, this else block is actually another if expression with a separate condition, which is exactly how you chain if-else expressions in malb8dge.
+In the code example above, this else block is actually another if expression with a different condition, which is exactly how you chain if-else expressions in malb8dge.
 
 Now that we have the basic structure, we can use the `;` operator we learned about in [chapter 1](01-02-hello-world.md#hello-world) to output a helpful message.
 ```
