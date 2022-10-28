@@ -198,11 +198,27 @@ impl Interpreter {
             Max => op_reduce!("^*"),
 
             MostFreq => {
-                let mut counts = HashMap::new();
+                let mut values = Vec::new();
+                let mut counts = Vec::new();
                 for id in list {
-                    *counts.entry(id).or_insert(0) += 1;
+                    let value = &self.memory[id].data;
+                    match values.iter().position(|&v| v == value) {
+                        Some(pos) => counts[pos] += 1,
+                        None => {
+                            values.push(value);
+                            counts.push(1);
+                        }
+                    }
                 }
-                counts.into_iter().max_by_key(|(_, count)| *count).map(|(id, _)| id).unwrap_or(0)
+
+                push!(
+                    values
+                        .into_iter()
+                        .zip(counts)
+                        .max_by_key(|(_, count)| *count)
+                        .map(|(value, _)| value.clone())
+                        .unwrap_or(ValueType::Null())
+                )
             }
 
             Default | Map => push!(ValueType::List(list)),

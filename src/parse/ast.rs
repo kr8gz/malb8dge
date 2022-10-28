@@ -147,12 +147,12 @@ enum_modes! {
 
     // returns list
     Map: "~",
-    Unique: "/",
+    Unique: "/",        // key func
+    SortAsc: "<",       // key func
+    SortDesc: ">",      // key func
+    Filter: "-",        // key func
     Print: ";",
     PrintNoSpaces: "%",
-    SortAsc: "<",
-    SortDesc: ">",
-    Filter: "-",
 }
 
 enum_modes! {
