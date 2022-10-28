@@ -32,6 +32,12 @@ jobs:
         uses: peaceiris/actions-mdbook@v1
 
       - run: mdbook build
+      
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v1
+        with:
+          # Upload entire repository
+          path: 'public/build'
 
   # Deployment job
   deploy:
