@@ -16,6 +16,7 @@ number = 1 ?\ 100
 }
 ```
 As you might have noticed, our program now mostly consists of only text!
+lmao
 
 ```
 /"Guess",t="the number!"n=1?\100;?/"Too",*_("Your guess: ")<n?"low!"!&>n?"high!"!%%"You guessed {t
