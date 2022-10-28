@@ -31,12 +31,12 @@ jobs:
       - name: Setup mdBook
         uses: peaceiris/actions-mdbook@v1
 
-      - run: mdbook build
+      - run: mdbook build docs
       
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v1
         with:
-          path: 'book/'
+          path: 'docs/book/'
 
   # Deployment job
   deploy:
