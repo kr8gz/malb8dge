@@ -15,7 +15,7 @@ number = 1 ?\ 100
     }
 }
 ```
-As you might have noticed, most of our program now consists of only text!
+As you might have noticed, our program now mostly consists of only text!
 
 ```
 /"Guess",t="the number!"n=1?\100;?/"Too",*_("Your guess: ")<n?"low!"!&>n?"high!"!%%"You guessed {t
