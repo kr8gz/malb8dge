@@ -1,6 +1,8 @@
-use std::{io::{self, Write}, process, collections::HashMap};
+use std::{io::{self, Write}, process, collections::HashMap, cmp::Ordering};
 
 use ariadne::{Fmt, Color};
+use itertools::Itertools;
+use rand::Rng;
 
 use crate::{util::{*, errors::Error, operators::OpType}, parse::{parser::Parser, ast::*}};
 
@@ -51,7 +53,13 @@ impl Interpreter {
             memory: Stack::new(),
             variables: Vec::new(),
             var_count: 0,
-            scopes: Vec::new(),
+            scopes: vec![
+                Scope {
+                    vars: HashMap::new(),
+                    parent: None,
+                    children: Vec::new(),
+                }
+            ],
 
             functions: Vec::new(),
             call_stack: Vec::new(),
@@ -75,8 +83,8 @@ impl Interpreter {
         id
     }
 
-    fn check_var(&self, name: &str, scope: usize, pos: &Pos) -> Result<usize> {
-        self.get_var(name, scope).ok_or_else(|| {
+    fn check_var(&mut self, name: &str, pos: &Pos, scope: usize) -> Result<usize> {
+        self.get_var(name, pos, scope).ok_or_else(|| {
             let mut msg = format!("Variable #{name}# is not defined");
             if self.scopes.iter().any(|scope| scope.vars.get(name).is_some()) {
                 msg += " in this scope";
@@ -85,14 +93,14 @@ impl Interpreter {
         })
     }
 
-    fn get_var(&self, name: &str, scope: usize) -> Option<usize> {
-        let mut scope = &self.scopes[scope];
+    fn get_var(&mut self, name: &str, pos: &Pos, scope: usize) -> Option<usize> {
+        let mut scope_data = &self.scopes[scope];
         loop {
-            match scope.vars.get(name) {
+            match scope_data.vars.get(name) {
                 Some(var_id) => return Some(*var_id),
-                None => match scope.parent {
-                    Some(scope_id) => scope = &self.scopes[scope_id],
-                    None => return None,
+                None => match scope_data.parent {
+                    Some(scope_id) => scope_data = &self.scopes[scope_id],
+                    None => return (name == "&").then(|| self.new_var(name, pos, scope))
                 },
             }
         }
@@ -120,12 +128,6 @@ impl Interpreter {
 
     pub fn run(&mut self, mut parser: Parser) -> Result<()> {
         self.functions.append(&mut parser.functions);
-
-        self.scopes.push(Scope {
-            vars: HashMap::new(),
-            parent: None,
-            children: Vec::new(),
-        });
 
         if self.is_shell {
             if let Some((last, rest)) = parser.statements.split_last() {
@@ -172,7 +174,7 @@ impl Interpreter {
                     Some((first, rest)) => {
                         rest.iter().copied()
                             .try_fold(*first, |a, b| {
-                                let value = operators::run_bin_op(&mut self.memory, a, b, $op, pos)?;
+                                let value = self.run_bin_op(a, b, $op, pos)?;
                                 Ok(push!(value))
                             })?
                     }
@@ -310,7 +312,7 @@ impl Interpreter {
 
                 match &$target.data {
                     NodeType::Variable(name) => {
-                        let id = self.get_var(name, scope).unwrap_or_else(|| self.new_var(name, pos, scope));
+                        let id = self.get_var(name, pos, scope).unwrap_or_else(|| self.new_var(name, pos, scope));
                         self.variables[id] = value;
                     }
 
@@ -392,8 +394,8 @@ impl Interpreter {
 
                 match &target.data {
                     NodeType::Variable(name) => {
-                        let id = self.check_var(name, scope, pos)?;
-                        self.variables[id] = push!(operators::run_bin_op(&mut self.memory, self.variables[id], value, op, pos)?);
+                        let id = self.check_var(name, pos, scope)?;
+                        self.variables[id] = push!(self.run_bin_op(self.variables[id], value, op, pos)?);
                         self.variables[id]
                     }
 
@@ -405,7 +407,7 @@ impl Interpreter {
 
                         let ret = match &mut target_value.data {
                             ValueType::List(list) => {
-                                list[index] = push!(operators::run_bin_op(&mut self.memory, list[index], value, op, pos)?);
+                                list[index] = push!(self.run_bin_op(list[index], value, op, pos)?);
                                 list[index]
                             }
 
@@ -487,13 +489,13 @@ impl Interpreter {
 
             UnaryOp { target, op_type, op } => {
                 let target = self.run_node(target, scope)?;
-                push!(operators::run_unary_op(&mut self.memory, target, *op_type, op, pos)?)
+                push!(self.run_unary_op(target, *op_type, op, pos)?)
             }
 
             BinOp { a, op, b } => {
                 let a = self.run_node(a, scope)?;
                 let b = self.run_node(b, scope)?;
-                push!(operators::run_bin_op(&mut self.memory, a, b, op, pos)?)
+                push!(self.run_bin_op(a, b, op, pos)?)
             }
 
             Compare { first, chain } => {
@@ -532,9 +534,9 @@ impl Interpreter {
 
                 match &target.data {
                     NodeType::Variable(name) => {
-                        let id = self.check_var(name, scope, pos)?;
+                        let id = self.check_var(name, pos, scope)?;
                         let ret = self.variables[id];
-                        self.variables[id] = push!(operators::run_bin_op(&mut self.memory, self.variables[id], value, op, pos)?);
+                        self.variables[id] = push!(self.run_bin_op(self.variables[id], value, op, pos)?);
                         if mode.aft() { ret } else { self.variables[id] }
                     }
 
@@ -547,7 +549,7 @@ impl Interpreter {
                         let ret = match &mut target_value.data {
                             ValueType::List(list) => {
                                 let ret = list[index];
-                                list[index] = push!(operators::run_bin_op(&mut self.memory, list[index], value, op, pos)?);
+                                list[index] = push!(self.run_bin_op(list[index], value, op, pos)?);
                                 if mode.aft() { ret } else { list[index] }
                             }
 
@@ -643,7 +645,7 @@ impl Interpreter {
                     ( $op:literal ) => {
                         {
                             let value = push!(value);
-                            operators::run_unary_op(&mut self.memory, value, OpType::After, $op, pos)?
+                            self.run_unary_op(value, OpType::After, $op, pos)?
                         }
                     }
                 }
@@ -663,7 +665,10 @@ impl Interpreter {
                     .collect::<Result<_>>()?
             )),
 
-            Variable(name) => self.variables[self.check_var(name, scope, pos)?],
+            Variable(name) => {
+                let id = self.check_var(name, pos, scope)?;
+                self.variables[id]
+            }
 
             FragmentString(frags) => push!(ValueType::String(
                 frags.iter()
@@ -681,5 +686,499 @@ impl Interpreter {
 
             _ => todo!("remove this catch-all arm when done")
         })
+    }
+
+    fn run_unary_op(&mut self, target_id: usize, op_type: OpType, op: &str, pos: &Pos) -> Result<ValueType> {
+        use ValueType::*;
+    
+        let mut target = self.memory[target_id].clone();
+                
+        let repr = match op_type {
+            OpType::Before => format!("{}x", op),
+            OpType::After => format!("x{}", op),
+            _ => panic!("specified type isn't a unary operator")
+        };
+    
+        macro_rules! unary_ops {
+            (
+                $(
+                    $impl_op:literal {
+                        $(
+                            $( % convert $from:pat => $to:expr; )+
+                        )?
+                        $( $a:pat => $ret:expr; )*
+                    }
+                )*
+            ) => {
+    
+                match op {
+                    $(
+                        $impl_op => {
+                            $(
+                                match &target.data {
+                                    $( $from => target.data = $to, )+
+                                    _ => ()
+                                }
+                            )?
+    
+                            match target.data {
+                                $( $a => $ret, )*
+                                #[allow(unreachable_patterns)] // not every operator matches all types
+                                _ => {
+                                    let type_name = self.memory[target_id].type_name();
+                                    return Err(
+                                        Error::err("Type error")
+                                            .label(target.pos.clone(), format!("This has type #{type_name}#"))
+                                            .label(pos.clone(), format!("#{repr}# is not implemented for type #{type_name}#"))
+                                    )
+                                }
+                            }
+                        }
+                    )*
+                    _ => unimplemented!("{repr}")
+                }
+            }
+        }
+    
+        let ret = match op_type {
+            OpType::Before => unary_ops! {
+                "!" {
+                    a   =>  Boolean(!a.as_bool());
+                }
+    
+                "^" {
+                    a   =>  List({
+                                let i = a.as_int().ok_or_else(|| {
+                                    Error::err("Type error")
+                                        .label(pos.clone(), format!("Expected an integer for #{repr}#"))
+                                        .label(target.pos.clone(), format!("Cannot convert #{}# to an integer", a.as_repr_string(&self.memory)))
+                                })? as i64;
+                                if i < 0 { i+1..1 } else { 0..i }
+                                    .map(|i| self.memory.push(ValueType::Number(i as f64).into_value(pos)))
+                                    .collect()
+                            });
+                }
+    
+                "?\\" {
+                    % convert a @ (Boolean(_) | Null()) => Number(a.as_int().unwrap());
+                    Number(a) => Number(rand::thread_rng().gen_range(0.min(a as i64)..=0.max(a as i64)) as f64);
+                }
+    
+                "-" {
+                    a   =>  Number(-a.as_num().ok_or_else(|| {
+                                Error::err("Type error")
+                                    .label(pos.clone(), format!("Expected a number for {op}x"))
+                                    .label(target.pos.clone(), format!("Cannot convert #{}# to a number", a.as_repr_string(&self.memory)))
+                            })?);
+                }
+    
+                "." {
+                    
+                }
+    
+                "`" {
+    
+                }
+    
+                "``" {
+    
+                }
+    
+                "*" {
+                    a => {
+                        let id = self.get_var("&", pos, 0).unwrap();
+                        self.variables[id] = target_id;
+                        a
+                    };
+                }
+    
+                "@" {
+                    % convert Boolean(_) | Null() => String(target.as_repr_string(&self.memory));
+    
+                    String(a)   => String(a.reverse());
+                    List(mut a) => List({ a.reverse(); a });
+                    Number(a)   => Number(a.abs().to_string().reverse().parse::<f64>().unwrap().copysign(a));
+                }
+    
+                "^^" {
+    
+                }
+    
+                "#" {
+                    % convert a @ (Boolean(_) | Null()) => Number(a.as_int().unwrap());
+                    Number(a) => Number(a.abs());
+                }
+    
+                "'" {
+    
+                }
+            },
+    
+            OpType::After => unary_ops! {
+                "^^" {
+    
+                }
+    
+                "##" {
+    
+                }
+    
+                "#\\" {
+    
+                }
+    
+                "#$" {
+    
+                }
+    
+                "_" {
+                    % convert Boolean(_) | Null() => String(target.as_string(&self.memory));
+    
+                    String(a)   =>  Number(a.len() as f64);
+                    List(a)     =>  Number(a.len() as f64);
+                    Number(a)   =>  Number(a.to_string().len() as f64);
+                }
+    
+                "``" {
+    
+                }
+    
+                "$$" {
+    
+                }
+    
+                "$" {
+                    % convert a @ (Boolean(_) | Null()) => Number(a.as_int().unwrap());
+    
+                    a @ Number(_)   =>  a;
+                    String(a)       =>  Number(a.parse().map_err(|_| Error::err("Value error")
+                                            .label(pos.clone(), "Found conversion to number")
+                                            .label(target.pos, format!("Cannot convert #\"{a}\"# to a number"))
+                                        )?);
+                }
+    
+                "'" {
+                    % convert a @ (Boolean(_) | Null()) => Number(a.as_int().unwrap());
+                    Number(a) => Number(a.round());
+                }
+    
+                "`" {
+                    % convert a @ (Boolean(_) | Null()) => Number(a.as_int().unwrap());
+                    Number(a) => Number(a.trunc());
+                }
+            },
+    
+            _ => unreachable!()
+        };
+    
+        Ok(ret)
+    }
+    
+    fn run_bin_op(&mut self, lhs_id: usize, rhs_id: usize, op: &str, pos: &Pos) -> Result<ValueType> {
+        use ValueType::*;
+    
+        let mut lhs = self.memory[lhs_id].clone();
+        let mut rhs = self.memory[rhs_id].clone();
+    
+        macro_rules! push {
+            ( $value:expr ) => { self.memory.push($value.into_value(pos)) }
+        }
+    
+        macro_rules! bin_ops {
+            (
+                $(
+                    $op:literal {
+                        $(
+                            % convert
+                            $( $from:pat => $to:expr; )+
+                        )?
+                        $(
+                            % one way
+                            $( $a1:pat, $b1:pat => $ret1:expr; )+
+                        )?
+                        $(
+                            % both ways
+                            $( $a2:pat, $b2:pat => $ret2:expr; )+
+                        )?
+                    }
+                )*
+            ) => {
+                match op {
+                    $(
+                        $op => {
+                            $(
+                                match &lhs.data {
+                                    $( $from => lhs.data = $to, )+
+                                    _ => ()
+                                }
+                                match &rhs.data {
+                                    $( $from => rhs.data = $to, )+
+                                    _ => ()
+                                }
+                            )?
+    
+                            match (lhs.data.clone(), rhs.data.clone()) {
+                                $(
+                                    $(
+                                        ($a1, $b1) => $ret1,
+                                    )+
+                                )?
+                                $(
+                                    $(
+                                        ($a2, $b2) => $ret2,
+                                        
+                                        #[allow(unused_assignments)] // they can be used in the op implementations
+                                        ($b2, $a2) => {
+                                            (lhs, rhs) = (rhs, lhs);
+                                            $ret2
+                                        }
+                                    )+
+                                )?
+                                #[allow(unreachable_patterns)] // not every operator matches all types
+                                _ => {
+                                    let l_type = self.memory[lhs_id].type_name();
+                                    let r_type = self.memory[rhs_id].type_name();
+                                    return Err(
+                                        Error::err("Type error")
+                                            .label(lhs.pos, format!("This has type #{l_type}#"))
+                                            .label(rhs.pos, format!("This has type #{r_type}#"))
+                                            .label(pos.clone(), format!("Binary #{op}# is not implemented for types #{l_type}# and #{r_type}#"))
+                                    )
+                                }
+                            }
+                        }
+                    )*
+                    _ => unimplemented!("a {op} b")
+                }
+            }
+        }
+    
+        #[macro_export]
+        macro_rules! unique {
+            ( $memory:expr, $iter:expr ) => {
+                {
+                    let mut seen = Vec::new();
+                    let mut unique = Vec::new();
+                    for el in $iter {
+                        if !seen.contains(&$memory[el].data) {
+                            unique.push(el);
+                            seen.push($memory[el].data.clone());
+                        }
+                    }
+                    unique
+                }
+            }
+        }
+    
+        let ret = bin_ops! {
+            "||" {
+                % one way
+                a, b => Boolean(a.as_bool() || b.as_bool());
+            }
+        
+            "&&" {
+                % one way
+                a, b => Boolean(a.as_bool() && b.as_bool());
+            }
+        
+            "|" {
+                % one way
+                a, b => if a.as_bool() { a } else { b };
+            }
+            
+            "&" {
+                % one way
+                a, b => if a.as_bool() { b } else { a };
+            }
+        
+            "-?" {
+                // something with 1 and -1 lol
+            }
+        
+            ".." {
+        
+            }
+        
+            "#" {
+        
+            }
+        
+            "?\\" {
+                % convert
+                x @ (Boolean(_) | Null()) => Number(x.as_int().unwrap());
+        
+                % one way
+                Number(a),  Number(b)   => Number(rand::thread_rng().gen_range(a.min(b) as i64..=a.max(b) as i64) as f64);
+            }
+        
+            "%" {
+                % convert
+                x @ (Boolean(_) | Null()) => Number(x.as_int().unwrap());
+        
+                % one way
+                Number(a),  Number(b)   =>  Number(a % b);
+            }
+        
+            "+" {
+                % convert
+                x @ (Boolean(_) | Null()) => Number(x.as_int().unwrap());
+        
+                % one way
+                Number(a),  Number(b)   =>  Number(a + b);
+                List(a),    List(b)     =>  List(a.into_iter().chain(b.into_iter()).collect());
+                String(a),  String(b)   =>  String(a + &b);
+                String(a),  b @ List(_) =>  String(a + &b.as_joined_list_string(&self.memory, ""));
+                
+                List(a),    _           =>  List(a.into_iter().chain([rhs_id]).collect());
+                String(a),  _           =>  String(a + &rhs.as_string(&self.memory));
+                _,          String(b)   =>  String(lhs.as_string(&self.memory) + &b);
+            }
+        
+            "-" {
+                % convert
+                x @ (Boolean(_) | Null()) => Number(x.as_int().unwrap());
+        
+                % one way
+                List(mut a), List(b)    =>  List({
+                                                for b_id in b {
+                                                    if let Some(pos) = a.iter().position(|&el| self.memory[el].data == self.memory[b_id].data) {
+                                                        a.remove(pos);
+                                                    }
+                                                };
+                                                a
+                                            });
+                List(mut a), _          =>  List({
+                                                if let Some(pos) = a.iter().position(|&el| self.memory[el].data == self.memory[rhs_id].data) {
+                                                    a.remove(pos);
+                                                }
+                                                a
+                                            });
+        
+                String(a),  String(b)   =>  String({
+                                                if a.len() == 1 && b.len() == 1 {
+                                                    (a.chars().next().unwrap()..=b.chars().next().unwrap()).collect()
+                                                } else {
+                                                    return Err(
+                                                        Error::err("Value error")
+                                                            .label(pos.clone(), "Expected strings with #length 1# for character range")
+                                                            .label(lhs.pos, format!("This string has length #{}#", a.len()))
+                                                            .label(rhs.pos, format!("This string has length #{}#", b.len()))
+                                                    )
+                                                }
+                                            });
+        
+                String(a),  Number(b)   =>  String({
+                                                if b >= 0.0 {
+                                                    a.chars().dropping_back(b as usize).collect()
+                                                } else {
+                                                    return Err(
+                                                        Error::err("Value error")
+                                                            .label(
+                                                                pos.clone(),
+                                                                format!(
+                                                                    "Expected #number >= 0# for right side of {} {op} {}",
+                                                                    lhs.type_name(), rhs.type_name()
+                                                                ),
+                                                            )
+                                                            .label(rhs.pos, format!("{b} is not >= 0"))
+                                                    )
+                                                }
+                                            });
+        
+                Number(a),  Number(b)   =>  Number(a - b);
+            }
+        
+            "*" {
+                % convert
+                x @ (Boolean(_) | Null()) => Number(x.as_int().unwrap());
+        
+                % one way
+                Number(a),  Number(b)   =>  Number(a * b);
+                List(a),    List(b)     =>  List(unique!(self.memory, a.into_iter().chain(b.into_iter())));
+        
+                % both ways
+                List(a),    Number(b)   =>  List({
+                                                let mut res = Vec::new();
+                                                for _ in 0..b.abs() as usize {
+                                                    res.extend(a.iter().map(|&v| self.memory.push(self.memory[v].clone())));
+                                                }
+                                                if b < 0.0 { res.reverse(); }
+                                                res
+                                            });
+                
+                String(mut a), Number(b) => String({
+                                                a = a.repeat(b.abs() as usize);
+                                                if b < 0.0 { a = a.reverse(); }
+                                                a
+                                            });
+            }
+        
+            "/" {
+                % convert
+                x @ (Boolean(_) | Null()) => Number(x.as_int().unwrap());
+        
+                % one way
+                Number(a),  Number(b)   =>  Number(a / b);
+                List(a),    List(b)     =>  List(unique!(self.memory, a.iter().chain(b.iter()).cloned().filter(|id| a.contains(id) && b.contains(id))));
+            }
+        
+            "//" {
+                % convert
+                x @ (Boolean(_) | Null()) => Number(x.as_int().unwrap());
+        
+                % one way
+                Number(a),  Number(b)   =>  Number((a / b).trunc());
+            }
+        
+            "+-" {
+                % convert
+                x @ (Boolean(_) | Null()) => Number(x.as_int().unwrap());
+        
+                % one way
+                Number(a),  Number(b)   =>  List(vec![push!(Number(a + b)), push!(Number(a - b))]);
+            }
+        
+            "/%" {
+                % convert
+                x @ (Boolean(_) | Null()) => Number(x.as_int().unwrap());
+        
+                % one way
+                Number(a),  Number(b)   =>  List(vec![push!(Number((a / b).trunc())), push!(Number(a % b))]);
+            }
+        
+            "^" {
+                % convert
+                x @ (Boolean(_) | Null()) => Number(x.as_int().unwrap());
+        
+                % one way
+                Number(a),  Number(b)   =>  Number(a.powf(b));
+                List(a),    List(b)     =>  List(unique!(self.memory, a.iter().chain(b.iter()).cloned().filter(|id| a.contains(id) != b.contains(id))));
+                
+                List(a),    String(b)   =>  String(a.into_iter().map(|el| self.memory[el].as_string(&self.memory)).join(&b));
+                String(a),  String(b)   =>  String(a.chars().map(|c| c.to_string()).intersperse(b).collect());
+            }
+        
+            ".*" {
+                % one way
+                a, b => match lhs.compare(&rhs, pos)? {
+                    Ordering::Less | Ordering::Equal => a,
+                    _ => b
+                };
+            }
+        
+            "^*" {
+                % one way
+                a, b => match lhs.compare(&rhs, pos)? {
+                    Ordering::Greater => a,
+                    _ => b
+                };
+            }
+        
+            "@" {
+        
+            }
+        };
+    
+        Ok(ret)
     }
 }
