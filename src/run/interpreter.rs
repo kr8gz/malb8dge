@@ -291,7 +291,7 @@ impl Interpreter {
                     let target = &self.memory[$target];
                     let index = &self.memory[$index];
 
-                    let mut i = index.data.as_int().ok_or_else(|| {
+                    let i = index.data.as_int().ok_or_else(|| {
                         Error::err("Type error")
                             .label(pos.clone(), "Expected an integer for list index")
                             .label(index.pos.clone(), format!("Cannot convert #{}# to an integer", index.as_repr_string(&self.memory)))
@@ -306,18 +306,8 @@ impl Interpreter {
                                 .label(target.pos.clone(), format!("Cannot convert #{}# to a list", target.as_repr_string(&self.memory)))
                         )
                     };
-                    
-                    if i < 0.0 {
-                        i += len;
-                    }
-                    if i < 0.0 || i >= len {
-                        return Err(
-                            Error::err("Index out of bounds")
-                                .label(target.pos.clone(), format!("Length of this is #{len}#"))
-                                .label(index.pos.clone(), format!("Index is #{i}#"))
-                        )
-                    }
-                    i as usize
+
+                    i.trunc().rem_euclid(len) as usize
                 }
             }
         }
@@ -472,8 +462,6 @@ impl Interpreter {
                 push!(ValueType::List(list))
             }
 
-            // ...
-
             If { cond, on_true, on_false } => {
                 let cond = self.run_node(cond, scope)?;
                 let block = if self.memory[cond].as_bool() { on_true } else { on_false };
@@ -485,7 +473,28 @@ impl Interpreter {
                 }
             }
 
-            // ...
+            // For { iter, vars, mode, block } => {
+            //     
+            // }
+
+            While { cond, mode, block } => {
+                let mut ret = Vec::new();
+                loop {
+                    run!(cond);
+                    if !self.memory[cond].as_bool() {
+                        break self.run_iter_mode(mode, ret, pos)?
+                    }
+
+                    let value = self.run_node(block, scope)?;
+                    ret.push(value);
+
+                    if self._break {
+                        break self.run_iter_mode(mode, ret, pos)?
+                    } else if self._return {
+                        break value
+                    }
+                }
+            }
 
             Loop { mode, block } => {
                 let mut ret = Vec::new();
@@ -768,19 +777,19 @@ impl Interpreter {
                                     Error::err("Type error")
                                         .label(pos.clone(), format!("Expected an integer for #{repr}#"))
                                         .label(target.pos.clone(), format!("Cannot convert #{}# to an integer", a.as_repr_string(&self.memory)))
-                                })? as i64;
-                                if i < 0 { i+1..1 } else { 0..i }
+                                })?.abs() as i64;
+                                (1..=i)
                                     .map(|i| self.memory.push(ValueType::Number(i as f64).into_value(pos)))
                                     .collect()
                             });
                 }
     
                 "-" {
-                    a   =>  Number(-a.as_num().ok_or_else(|| {
-                                Error::err("Type error")
-                                    .label(pos.clone(), format!("Expected a number for {op}x"))
-                                    .label(target.pos.clone(), format!("Cannot convert #{}# to a number", a.as_repr_string(&self.memory)))
-                            })?);
+                    % convert Boolean(_) | Null() => Number(target.as_int().unwrap());
+    
+                    String(a)   => String(a.reverse());
+                    List(mut a) => List({ a.reverse(); a });
+                    Number(a)   => Number(-a);
                 }
     
                 "." {
@@ -803,12 +812,11 @@ impl Interpreter {
                     };
                 }
     
-                "@" {
-                    % convert Boolean(_) | Null() => String(target.as_repr_string(&self.memory));
-    
-                    String(a)   => String(a.reverse());
-                    List(mut a) => List({ a.reverse(); a });
-                    Number(a)   => Number(a.abs().to_string().reverse().parse::<f64>().unwrap().copysign(a));
+                "+" {
+                    _ => {
+                        let one = self.memory.push(ValueType::Number(1.0).into_value(pos));
+                        self.run_bin_op(target_id, one, "+", pos)?
+                    };
                 }
     
                 "^^" {
@@ -816,7 +824,7 @@ impl Interpreter {
                 }
     
                 "#" {
-                    % convert a @ (Boolean(_) | Null()) => Number(a.as_int().unwrap());
+                    % convert Boolean(_) | Null() => Number(target.as_int().unwrap());
                     Number(a) => Number(a.abs());
                 }
     
@@ -827,7 +835,7 @@ impl Interpreter {
     
             OpType::After => unary_ops! {
                 "?\\" {
-                    % convert a @ (Boolean(_) | Null()) => Number(a.as_int().unwrap());
+                    % convert Boolean(_) | Null() => Number(target.as_int().unwrap());
                     Number(a) => Number(rand::thread_rng().gen_range({ let a = a.abs() as i64; 1.min(a)..=1.max(a) }) as f64);
                 }
 
@@ -862,7 +870,8 @@ impl Interpreter {
                 "$$" {
     
                 }
-    
+
+                // keep?
                 "$" {
                     a   =>  Number(a.as_num().ok_or_else(|| Error::err("Value error")
                                 .label(pos.clone(), "Found conversion to number")
@@ -871,12 +880,12 @@ impl Interpreter {
                 }
     
                 "'" {
-                    % convert a @ (Boolean(_) | Null()) => Number(a.as_int().unwrap());
+                    % convert Boolean(_) | Null() => Number(target.as_int().unwrap());
                     Number(a) => Number(a.round());
                 }
     
                 "`" {
-                    % convert a @ (Boolean(_) | Null()) => Number(a.as_int().unwrap());
+                    % convert Boolean(_) | Null() => Number(target.as_int().unwrap());
                     Number(a) => Number(a.trunc());
                 }
             },

@@ -46,19 +46,11 @@ impl<'a> Parser<'a> {
             .label(pos, format!("Expected #{expected}#, found #{found}#"))
     }
 
-    fn expected_bracket(&mut self, open_pos: Pos, bracket: &str, has_value: bool) -> Result<()> {
+    fn closing_bracket(&mut self, bracket: &str) {
         let next = self.next();
         if !next.value.is(bracket) && !next.value.eof() {
-            return Err(
-                Error::err("Syntax error")
-                    .label(open_pos, "Opening bracket here")
-                    .label(next.pos, format!(
-                        "Expected #{}# or #'{bracket}'#, found #{}#",
-                        if has_value { "value separator" } else { "value" }, next.value
-                    ))
-            )
+            self.prev()
         }
-        Ok(())
     }
 
     fn statement_sep(&mut self) {
@@ -217,6 +209,7 @@ impl<'a> Parser<'a> {
                 if
                     peek.is("(") || peek.is("[") ||
                     peek.is("_") || peek.is("$") ||
+                    peek.is("&") || peek.is("~") ||
                     matches!(peek, TokenType::FragmentString(_) | TokenType::Identifier(_))
                 {
                     NodeType::Group(Box::new(Node {
@@ -258,7 +251,7 @@ impl<'a> Parser<'a> {
                             s.parse_expression(true)
                         })
                     })?;
-                    self.expected_bracket(pos.clone(), ")", expr.is_some())?;
+                    self.closing_bracket(")");
                     match expr {
                         Some(expr) => NodeType::Group(Box::new(expr)),
                         None => NodeType::List(Vec::new()),
@@ -271,7 +264,7 @@ impl<'a> Parser<'a> {
                             s.parse_list(None)
                         })
                     })?;
-                    self.expected_bracket(pos.clone(), "]", !list.is_empty())?;
+                    self.closing_bracket("]");
                     NodeType::List(list)
                 },
 
@@ -803,7 +796,7 @@ impl<'a> Parser<'a> {
                                 s.parse_expression(false)
                             })
                         })?.unwrap();
-                        self.expected_bracket(pos.clone(), ")", true)?;
+                        self.closing_bracket(")");
 
                         expr.pos = pos.start..self.pos_end();
                         parsed_value.pos.end = expr.pos.end;
@@ -818,7 +811,7 @@ impl<'a> Parser<'a> {
                                         s.parse_list(None)
                                     })
                                 })?;
-                                self.expected_bracket(pos.clone(), ")", !args.is_empty())?;
+                                self.closing_bracket(")");
                                 args
                             },
                         }
@@ -841,25 +834,7 @@ impl<'a> Parser<'a> {
                                 loop {
                                     let token = self.next();
 
-                                    if token.value.is("]") || token.value.eof() {
-                                        break if is_slice {
-                                            NodeType::Slice {
-                                                target: Box::new(parsed_value),
-                                                start: Box::new(values[0].take()),
-                                                stop: Box::new(values[1].take()),
-                                                step: Box::new(values[2].take()),
-                                            }
-                                        } else {
-                                            NodeType::Index {
-                                                target: Box::new(parsed_value),
-                                                index: Box::new(values[0].take().ok_or_else(
-                                                    || self.expected(token.pos, "value", token.value)
-                                                )?),
-                                            }
-                                        }
-                                    }
-
-                                    else if token.value.is(",") {
+                                    if token.value.is(",") {
                                         is_slice = true;
                                         value_pos += 1;
                                     }
@@ -877,7 +852,22 @@ impl<'a> Parser<'a> {
 
                                     else {
                                         self.prev();
-                                        self.expected_bracket(pos.clone(), "]", true)?;
+                                        self.closing_bracket("]");
+                                        break if is_slice {
+                                            NodeType::Slice {
+                                                target: Box::new(parsed_value),
+                                                start: Box::new(values[0].take()),
+                                                stop: Box::new(values[1].take()),
+                                                step: Box::new(values[2].take()),
+                                            }
+                                        } else {
+                                            NodeType::Index {
+                                                target: Box::new(parsed_value),
+                                                index: Box::new(values[0].take().ok_or_else(
+                                                    || self.expected(token.pos, "value", token.value)
+                                                )?),
+                                            }
+                                        }
                                     }
 
                                     if value_pos > 2 {
@@ -899,7 +889,7 @@ impl<'a> Parser<'a> {
                                                 s.parse_expression(false)
                                             })
                                         })?.unwrap();
-                                        self.expected_bracket(pos.clone(), "]", true)?;
+                                        self.closing_bracket("]");
                                         expr
                                     }),
                                 }
@@ -910,7 +900,7 @@ impl<'a> Parser<'a> {
                                 mode: iter_mode,
                                 expr: {
                                     let expr = Box::new(self.reset_stops(|s| s.parse_expression(false))?.unwrap());
-                                    self.expected_bracket(pos.clone(), "]", true)?;
+                                    self.closing_bracket("]");
                                     expr
                                 },
                             }

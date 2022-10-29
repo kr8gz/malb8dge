@@ -63,7 +63,7 @@ pub const fn op_type(prec_type: PrecType) -> OpType {
 
 // precedence goes from top to bottom, same row = same precedence
 // before operator / binary operator + backslash combos are an option for new operators
-// bef + is also free
+// bef @ is also free
 operators! {
     RightAssoc: "||",
     RightAssoc: "&&",
@@ -94,7 +94,7 @@ operators! {
     LeftAssoc:  ".*", "^*",
     LeftAssoc:  "@",
 
-    Before:     "@", "^^", "#", "'",
+    Before:     "+", "^^", "#", "'",
 
     % no precedence
     Before:     ";", "/", "|", "/|",
