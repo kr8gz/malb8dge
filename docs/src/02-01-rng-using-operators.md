@@ -19,14 +19,13 @@ A list of all the operators in malb8dge can be found [here](TODO).
 
 ## Generating a random number
 For our game, we will generate a number between 1 and 100, including both ends.
-Of course malb8dge has an operator for that: `a ?\ b`. It is in the binary position since we need 2 values, one for each end.
+Of course malb8dge has an operator for that: `x?\`. This will generate a random number between 1 and x.
 (It looks very ugly, but that's not the point of malb8dge. It will only get uglier.)
 
 Create a new file called *guessing_game.mlb8* and paste in the following code:
 ```
-number = 1 ?\ 100
+number = 100?\
 ```
-
 This will generate a random number within our specified range and assign it to the variable `number`.
 
 With our first piece of the puzzle in place, we can now move on to the next part: creating a loop and allowing the user to input their guesses.

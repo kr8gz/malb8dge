@@ -78,7 +78,6 @@ operators! {
     Before:     "^",
 
     LeftAssoc:  "?\\",
-    Before:     "?\\",
 
     LeftAssoc:  "%",
     LeftAssoc:  "+",
@@ -99,6 +98,6 @@ operators! {
 
     % no precedence
     Before:     ";", "/", "|", "/|",
-    After:      "^^", "##", "#\\", "#$", "_", "``", "$$", "$", "'", "`",
+    After:      "?\\", "^^", "##", "#\\", "#$", "_", "``", "$$", "$", "'", "`",
     Other:      "%%", "++", "--",
 }

@@ -16,4 +16,5 @@
     - [Removing all formatting](03-03-removing-all-formatting.md)
 
 ---
-# other stuffs
+# Documentation
+- [theres nothing here rn]()

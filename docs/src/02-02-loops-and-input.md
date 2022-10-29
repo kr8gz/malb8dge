@@ -26,7 +26,7 @@ This will print `Your guess: `&zwnj; before waiting for user input.
 
 Your code should now look something like this:
 ```
-number = 1 ?\ 100
+number = 100?\
 
 ? {
     guess = _("Your guess: ")

@@ -3,7 +3,7 @@ Here's our progress so far:
 ```
 ;"Guess the number!"
 
-number = 1 ?\ 100
+number = 100?\
 
 ? {
     *_("Your guess: ") > number ? {
@@ -69,7 +69,7 @@ Here's a quick overview of what we've created:
 ```
 ;"Guess", t = " the number!"
 
-number = 1 ?\ 100
+number = 100?\
 
 ? {
     /"Too", *_("Your guess: ") > number ? {

@@ -775,11 +775,6 @@ impl Interpreter {
                             });
                 }
     
-                "?\\" {
-                    % convert a @ (Boolean(_) | Null()) => Number(a.as_int().unwrap());
-                    Number(a) => Number(rand::thread_rng().gen_range(0.min(a as i64)..=0.max(a as i64)) as f64);
-                }
-    
                 "-" {
                     a   =>  Number(-a.as_num().ok_or_else(|| {
                                 Error::err("Type error")
@@ -831,6 +826,11 @@ impl Interpreter {
             },
     
             OpType::After => unary_ops! {
+                "?\\" {
+                    % convert a @ (Boolean(_) | Null()) => Number(a.as_int().unwrap());
+                    Number(a) => Number(rand::thread_rng().gen_range({ let a = a.abs() as i64; 1.min(a)..=1.max(a) }) as f64);
+                }
+
                 "^^" {
     
                 }
@@ -864,13 +864,10 @@ impl Interpreter {
                 }
     
                 "$" {
-                    % convert a @ (Boolean(_) | Null()) => Number(a.as_int().unwrap());
-    
-                    a @ Number(_)   =>  a;
-                    String(a)       =>  Number(a.parse().map_err(|_| Error::err("Value error")
-                                            .label(pos.clone(), "Found conversion to number")
-                                            .label(target.pos, format!("Cannot convert #\"{a}\"# to a number"))
-                                        )?);
+                    a   =>  Number(a.as_num().ok_or_else(|| Error::err("Value error")
+                                .label(pos.clone(), "Found conversion to number")
+                                .label(target.pos, format!("Cannot convert #{}# to a number", a.as_repr_string(&self.memory)))
+                            )?);
                 }
     
                 "'" {

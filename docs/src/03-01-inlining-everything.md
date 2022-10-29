@@ -3,7 +3,7 @@ Let's take another look at our finished program:
 ```
 ;"Guess the number!"
 
-number = 1 ?\ 100
+number = 100?\
 
 ? {
     guess = _("Your guess: ")

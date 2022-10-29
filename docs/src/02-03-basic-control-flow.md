@@ -59,7 +59,7 @@ If we put these if expressions into our infinite loop and add a few finishing to
 ```
 ;"Guess the number!"
 
-number = 1 ?\ 100
+number = 100?\
 
 ? {
     guess = _("Your guess: ")
